@@ -151,6 +151,94 @@ fn test_execute_payment_before_due_time() {
     assert_eq!(d.interval, ivl);
 }
 
+// ─── Requirement 13.2b — No double payment within same interval ──────────────
+
+/// After a successful execute_payment, the next_payment timestamp is advanced by one
+/// interval. A second immediate call must return PaymentNotDue because the new
+/// next_payment lies in the future, preventing any double-charge within the same
+/// billing period.
+#[test]
+fn test_no_double_payment_within_same_interval() {
+    let t   = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+
+    // Advance just past the first due timestamp.
+    t.advance(ivl + 1);
+
+    let sb_before = t.sub_bal();
+    let mb_before = t.mer_bal();
+
+    // First call — must succeed and transfer funds.
+    t.client.execute_payment(&t.subscriber, &t.merchant);
+    assert_eq!(t.sub_bal(), sb_before - amt, "first payment must debit subscriber");
+    assert_eq!(t.mer_bal(), mb_before + amt, "first payment must credit merchant");
+
+    // next_payment is now `now + interval` — still in the future.
+    let d = t.get_sub();
+    assert!(
+        d.next_payment > t.env.ledger().timestamp(),
+        "next_payment must be in the future after a successful payment"
+    );
+
+    // Second immediate call — must be rejected; no funds may move.
+    let r = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(
+        matches!(r, Err(Ok(ContractError::PaymentNotDue))),
+        "second execute_payment before next interval must return PaymentNotDue"
+    );
+    assert_eq!(t.sub_bal(), sb_before - amt, "subscriber balance must not change on rejected second attempt");
+    assert_eq!(t.mer_bal(), mb_before + amt, "merchant balance must not change on rejected second attempt");
+
+    // Subscription state must remain intact (subscription is not cancelled on error).
+    assert!(t.has_sub(), "subscription must still exist after rejected double-payment attempt");
+}
+
+// ─── Requirement 13.2b — Double payment prevention ───────────────────────────
+
+/// Verifies that `execute_payment` returns `PaymentNotDue` if called a second time
+/// immediately after a successful payment, before the next interval has elapsed.
+///
+/// The contract must advance `next_payment` by `interval` on success so that any
+/// retry within the same window is rejected, preventing double charges.
+#[test]
+fn test_execute_payment_double_payment_prevented() {
+    let t   = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    // (a) Subscribe and advance past the first due date.
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    t.advance(ivl + 1);
+
+    let sub_bal_before = t.sub_bal();
+    let mer_bal_before = t.mer_bal();
+
+    // (b) First execute_payment must succeed and transfer funds.
+    t.client.execute_payment(&t.subscriber, &t.merchant);
+    assert_eq!(t.sub_bal(), sub_bal_before - amt, "first payment must debit subscriber");
+    assert_eq!(t.mer_bal(), mer_bal_before + amt, "first payment must credit merchant");
+
+    // Capture the advanced next_payment timestamp.
+    let next = t.get_sub().next_payment;
+
+    // (c) Immediate retry — no time has passed, so next_payment has not elapsed.
+    let result = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(
+        matches!(result, Err(Ok(ContractError::PaymentNotDue))),
+        "second execute_payment within the same interval must return PaymentNotDue"
+    );
+
+    // (d) Balances must be unchanged after the failed retry.
+    assert_eq!(t.sub_bal(), sub_bal_before - amt, "subscriber balance must not change on retry");
+    assert_eq!(t.mer_bal(), mer_bal_before + amt, "merchant balance must not change on retry");
+
+    // (e) next_payment must remain unchanged — the failed call must not mutate state.
+    assert_eq!(t.get_sub().next_payment, next, "next_payment must not advance on failed retry");
+}
+
 // ─── Requirement 13.3 — Execute after cancel ─────────────────────────────────
 
 #[test]

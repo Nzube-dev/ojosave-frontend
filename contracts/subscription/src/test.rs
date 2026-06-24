@@ -399,6 +399,112 @@ fn test_cancel_and_resubscribe() {
     assert_ne!(d1.next_payment, d2.next_payment);
 }
 
+// ─── Requirement: Payment Transfer Events (Success & Failure) ─────────────────
+
+/// Test that a successful payment transfer emits the `payment_transfer_success` event.
+/// This event provides dedicated telemetry for off-chain services to track successful collections.
+#[test]
+fn test_execute_payment_emits_success_event() {
+    let t = T::new();
+    let amt = 500_i128;
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &86_400_u64);
+    t.advance(86_401);
+
+    let n_before = t.env.events().all().iter().filter(|e| e.0 == t.contract_id).count();
+    t.client.execute_payment(&t.subscriber, &t.merchant);
+    let n_after = t.env.events().all().iter().filter(|e| e.0 == t.contract_id).count();
+
+    assert_eq!(n_after, n_before + 1, "execute_payment should emit exactly 1 event");
+}
+
+/// Test that payment transfer fails with `TransferFailed` error when subscriber has insufficient balance.
+/// The subscription state should remain unchanged (eligible for retry), and a failure event should be emitted.
+#[test]
+fn test_execute_payment_insufficient_balance() {
+    let t = T::new();
+    let high_amt = 15_000_000_i128; // exceeds subscriber balance (10_000_000)
+
+    // Subscribe with an amount larger than subscriber balance
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &high_amt, &86_400_u64);
+    let d_before = t.get_sub();
+    let sub_balance_before = t.sub_bal();
+
+    t.advance(86_401);
+
+    // Attempt to execute payment — should fail due to insufficient balance
+    let result = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(
+        matches!(result, Err(Ok(ContractError::TransferFailed))),
+        "execute_payment should return TransferFailed when balance is insufficient"
+    );
+
+    // Verify subscription state is unchanged (allows retry)
+    let d_after = t.get_sub();
+    assert_eq!(d_before.next_payment, d_after.next_payment, "next_payment must not advance on failure");
+    assert_eq!(d_before.amount, d_after.amount, "amount must not change on failure");
+    assert_eq!(d_before.interval, d_after.interval, "interval must not change on failure");
+
+    // Verify no transfer occurred
+    assert_eq!(t.sub_bal(), sub_balance_before, "subscriber balance must not change on failed transfer");
+    assert_eq!(t.mer_bal(), 0_i128, "merchant must not receive funds on failed transfer");
+}
+
+/// Test that a payment transfer failure emits the `payment_transfer_failure` event.
+/// This event allows off-chain services to track failed collection attempts for reconciliation and retry logic.
+#[test]
+fn test_execute_payment_emits_failure_event_on_insufficient_balance() {
+    let t = T::new();
+    let high_amt = 15_000_000_i128; // exceeds subscriber balance
+
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &high_amt, &86_400_u64);
+    t.advance(86_401);
+
+    let n_before = t.env.events().all().iter().filter(|e| e.0 == t.contract_id).count();
+
+    // Attempt execute_payment — should fail and emit failure event
+    let _ = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+
+    let n_after = t.env.events().all().iter().filter(|e| e.0 == t.contract_id).count();
+    assert_eq!(n_after, n_before + 1, "failed execute_payment should emit exactly 1 failure event");
+}
+
+/// Test that subscription remains eligible for retry after a failed transfer.
+/// This validates that failed transfers do not advance the next_payment timestamp.
+#[test]
+fn test_subscription_retryable_after_failed_transfer() {
+    let t = T::new();
+    let high_amt = 15_000_000_i128; // exceeds subscriber balance
+    let ivl = 86_400_u64;
+
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &high_amt, &ivl);
+    let d = t.get_sub();
+    let original_next_payment = d.next_payment;
+
+    t.advance(86_401);
+
+    // First attempt fails
+    let r1 = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(matches!(r1, Err(Ok(ContractError::TransferFailed))));
+
+    let d_after_fail = t.get_sub();
+    assert_eq!(d_after_fail.next_payment, original_next_payment, "next_payment must not change on failure");
+
+    // Now give subscriber enough balance for a successful retry
+    let token_client = token::Client::new(&t.env, &t.token);
+    // Mint additional tokens to subscriber
+    StellarAssetClient::new(&t.env, &t.token).mint(&t.subscriber, &high_amt);
+    let new_sub_bal = token_client.balance(&t.subscriber);
+    assert!(new_sub_bal >= high_amt, "subscriber should now have sufficient balance");
+
+    // Second attempt should succeed
+    let r2 = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(r2.is_ok(), "retry should succeed after balance is replenished");
+
+    let d_after_success = t.get_sub();
+    assert!(d_after_success.next_payment > original_next_payment, "next_payment must advance on success");
+    assert_eq!(d_after_success.next_payment, original_next_payment + ivl, "next_payment should advance by interval");
+}
+
 // ─── Requirement 13.10 — Events ──────────────────────────────────────────────
 
 #[test]

@@ -22,4 +22,8 @@ pub enum ContractError {
     TransferFailed       = 7,
     /// `execute_payment_batch` called with empty payment list
     EmptyBatch           = 8,
+    /// `execute_payment` called on a paused subscription
+    SubscriptionPaused   = 9,
+    /// `resume` called on an already-active (not paused) subscription
+    SubscriptionNotPaused = 10,
 }

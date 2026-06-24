@@ -14,7 +14,7 @@
  *  - Contract config error card with remediation steps
  */
 
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { useWallet } from '@/hooks/useWallet';
 import { buildAndSubmitSubscribe } from '@/lib/transaction_builder';
 import {
@@ -23,7 +23,7 @@ import {
   DEFAULT_INTERVAL_SECONDS,
   type FieldErrors,
 } from '@/lib/validation';
-import { CONTRACT_ID, NETWORK_PASSPHRASE, RPC_URL } from '@/constants/network';
+import { CONTRACT_ID, NETWORK_PASSPHRASE, NETWORK_NAME, RPC_URL } from '@/constants/network';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,6 +41,49 @@ const inputCls =
   'text-white placeholder-gray-500 focus:outline-none focus:ring-2 ' +
   'focus:ring-blue-500 disabled:opacity-50 min-h-[48px] ' +
   'transition-all duration-150 focus:scale-[1.02]';
+
+// ─── Network + contract status badge ──────────────────────────────────────────
+
+type ReachStatus = 'checking' | 'reachable' | 'unreachable';
+
+function NetworkBadge() {
+  const [status, setStatus] = useState<ReachStatus>('checking');
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(RPC_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(() => { if (!cancelled) setStatus('reachable'); })
+      .catch(() => { if (!cancelled) setStatus('unreachable'); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const networkColor = NETWORK_NAME === 'Mainnet'
+    ? 'bg-purple-900/50 border-purple-600/50 text-purple-300'
+    : 'bg-blue-900/50 border-blue-600/50 text-blue-300';
+
+  const statusDot: Record<ReachStatus, string> = {
+    checking:    'bg-yellow-400 animate-pulse',
+    reachable:   'bg-green-400',
+    unreachable: 'bg-red-400',
+  };
+  const statusLabel: Record<ReachStatus, string> = {
+    checking:    'Checking…',
+    reachable:   'Contract reachable',
+    unreachable: 'RPC unreachable',
+  };
+
+  return (
+    <div
+      aria-label={`Network: ${NETWORK_NAME}. Status: ${statusLabel[status]}`}
+      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${networkColor}`}
+    >
+      <span aria-hidden="true">{NETWORK_NAME === 'Mainnet' ? '🌐' : '🧪'}</span>
+      {NETWORK_NAME}
+      <span className={`h-2 w-2 rounded-full flex-shrink-0 ${statusDot[status]}`} aria-hidden="true" />
+      <span className="text-xs font-normal opacity-80">{statusLabel[status]}</span>
+    </div>
+  );
+}
 
 // ─── Contract config guard ─────────────────────────────────────────────────────
 

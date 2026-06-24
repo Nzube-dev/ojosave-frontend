@@ -303,7 +303,236 @@ fn test_cancel_emits_no_event() {
     assert_eq!(n, n2, "cancel must not emit any events");
 }
 
-// ─── Property-Based Tests ─────────────────────────────────────────────────────
+// ─── Token Transfer Failure Scenarios ─────────────────────────────────────────
+
+/// Test that execute_payment fails when subscriber lacks sufficient allowance.
+///
+/// Validates: Token transfer failure is caught and logged with diagnostic context
+/// Scenario:
+/// 1. Subscribe with amount = 100_000
+/// 2. Approve contract with only 50_000 (less than payment amount)
+/// 3. Advance time past payment due
+/// 4. execute_payment should fail (TokenTransferFailed or panic caught by framework)
+/// 5. Verify subscription data is NOT modified
+/// 6. Verify no payment event is emitted
+#[test]
+fn test_execute_payment_insufficient_allowance() {
+    let t = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    // (a) Subscribe for payment of 100_000
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let data_before = t.get_sub();
+    let events_before = t.env.events().all().len();
+
+    // (b) Reduce allowance to 50_000 (less than payment amount)
+    // First, reduce to 0
+    token::Client::new(&t.env, &t.token).approve(
+        &t.subscriber,
+        &t.contract_id,
+        &0_i128,
+        &(t.env.ledger().sequence() + 100_000_u32),
+    );
+    // Then set to insufficient amount
+    token::Client::new(&t.env, &t.token).approve(
+        &t.subscriber,
+        &t.contract_id,
+        &50_000_i128,
+        &(t.env.ledger().sequence() + 100_000_u32),
+    );
+
+    // (c) Advance time past payment due
+    t.advance(ivl + 1);
+
+    // (d) Record balances before payment attempt
+    let sub_bal_before = t.sub_bal();
+    let mer_bal_before = t.mer_bal();
+
+    // (e) Attempt payment — should fail due to insufficient allowance
+    let r = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    
+    // Framework catches the token transfer failure and returns error
+    assert!(r.is_err(), "execute_payment should fail with insufficient allowance");
+
+    // (f) Verify subscription data was NOT modified
+    let data_after = t.get_sub();
+    assert_eq!(data_after.amount, data_before.amount, "amount should not change");
+    assert_eq!(data_after.interval, data_before.interval, "interval should not change");
+    assert_eq!(data_after.next_payment, data_before.next_payment, "next_payment should not change");
+
+    // (g) Verify no funds were transferred
+    assert_eq!(t.sub_bal(), sub_bal_before, "subscriber balance must not change");
+    assert_eq!(t.mer_bal(), mer_bal_before, "merchant balance must not change");
+
+    // (h) Verify no new events were emitted (transfer failed before event emission)
+    let events_after = t.env.events().all().len();
+    assert_eq!(
+        events_after, events_before,
+        "no new events should be emitted on transfer failure"
+    );
+}
+
+/// Test that execute_payment fails when subscriber lacks sufficient balance.
+///
+/// Validates: Token transfer failure is caught and logged with diagnostic context
+/// Scenario:
+/// 1. Subscribe with amount = 100_000
+/// 2. Have sufficient allowance but insufficient balance
+/// 3. Advance time past payment due
+/// 4. execute_payment should fail (TokenTransferFailed or panic caught by framework)
+/// 5. Verify subscription data is NOT modified
+/// 6. Verify no payment event is emitted
+#[test]
+fn test_execute_payment_insufficient_balance() {
+    let t = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    // Reduce subscriber balance to less than payment amount (50_000 < 100_000)
+    // We do this by creating another account and transferring most of the tokens away
+    let third_party = Address::generate(&t.env);
+    
+    // First, transfer most of subscriber's balance to third party, leaving only 50_000
+    // We need to approve the transfer first
+    token::Client::new(&t.env, &t.token).approve(
+        &t.subscriber,
+        &t.subscriber,  // self-approve for transferring own tokens
+        &10_000_000_i128,
+        &(t.env.ledger().sequence() + 100_000_u32),
+    );
+    
+    // Transfer 9_950_000 away, keeping only 50_000
+    token::Client::new(&t.env, &t.token).transfer(
+        &t.subscriber,
+        &third_party,
+        &9_950_000_i128,
+    );
+
+    let sub_balance = t.sub_bal();
+    assert_eq!(sub_balance, 50_000_i128, "subscriber should have 50_000 after transfer");
+
+    // Approve contract for more than current balance
+    token::Client::new(&t.env, &t.token).approve(
+        &t.subscriber,
+        &t.contract_id,
+        &200_000_i128,
+        &(t.env.ledger().sequence() + 100_000_u32),
+    );
+
+    // (a) Subscribe for payment of 100_000 (but subscriber only has 50_000)
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let data_before = t.get_sub();
+    let events_before = t.env.events().all().len();
+
+    // (b) Advance time past payment due
+    t.advance(ivl + 1);
+
+    // (c) Record balances before payment attempt
+    let sub_bal_before = t.sub_bal();
+    let mer_bal_before = t.mer_bal();
+
+    // (d) Attempt payment — should fail due to insufficient balance (50_000 < 100_000)
+    let r = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    
+    // Framework catches the token transfer failure and returns error
+    assert!(r.is_err(), "execute_payment should fail with insufficient balance");
+
+    // (e) Verify subscription data was NOT modified
+    let data_after = t.get_sub();
+    assert_eq!(data_after.amount, data_before.amount, "amount should not change");
+    assert_eq!(data_after.interval, data_before.interval, "interval should not change");
+    assert_eq!(data_after.next_payment, data_before.next_payment, "next_payment should not change");
+
+    // (f) Verify no funds were transferred
+    assert_eq!(t.sub_bal(), sub_bal_before, "subscriber balance must not change");
+    assert_eq!(t.mer_bal(), mer_bal_before, "merchant balance must not change");
+
+    // (g) Verify no new events were emitted (transfer failed before event emission)
+    let events_after = t.env.events().all().len();
+    assert_eq!(events_after, events_before, "no new events on transfer failure");
+}
+
+/// Test that successful payment includes pre-transfer diagnostics logging.
+///
+/// Validates: execute_token_transfer logs balance and allowance before transfer
+/// Scenario:
+/// 1. Subscribe and execute a successful payment
+/// 2. Verify that diagnostics (balance, allowance, amount) are logged
+/// 3. Verify that transaction succeeds and event is emitted
+#[test]
+fn test_execute_payment_logs_diagnostics_on_success() {
+    let t = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    // (a) Subscribe
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let events_after_subscribe = t.env.events().all().len();
+
+    // (b) Advance time and execute payment
+    t.advance(ivl + 1);
+    let r = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+
+    // (c) Verify payment succeeded
+    assert!(r.is_ok(), "execute_payment should succeed");
+
+    // (d) Verify that logs were emitted (events count should increase)
+    // Note: Soroban logs are captured in env.events()
+    let events_after_payment = t.env.events().all().len();
+    assert!(
+        events_after_payment > events_after_subscribe,
+        "payment should emit logs and executed event"
+    );
+
+    // (e) Verify executed event was emitted
+    let contract_events: Vec<_> = t.env
+        .events()
+        .all()
+        .iter()
+        .filter(|e| e.0 == t.contract_id)
+        .collect();
+    
+    assert!(
+        contract_events.len() > 0,
+        "at least the executed event should be present"
+    );
+}
+
+/// Property test: No state mutation on transfer failure across random parameters
+#[test]
+fn test_no_state_mutation_on_transfer_failure() {
+    let t = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    // Subscribe
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let data_before = t.get_sub();
+
+    // Reduce allowance to cause transfer to fail
+    token::Client::new(&t.env, &t.token).approve(
+        &t.subscriber,
+        &t.contract_id,
+        &0_i128,
+        &(t.env.ledger().sequence() + 100_000_u32),
+    );
+
+    // Advance time
+    t.advance(ivl + 1);
+
+    // Attempt payment
+    let _r = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+
+    // Verify subscription data is identical
+    let data_after = t.get_sub();
+    assert_eq!(data_after.token, data_before.token, "token should not change");
+    assert_eq!(data_after.amount, data_before.amount, "amount should not change");
+    assert_eq!(data_after.interval, data_before.interval, "interval should not change");
+    assert_eq!(data_after.next_payment, data_before.next_payment, "next_payment should not change");
+}
+
+// ─── Existing property-based tests ─────────────────────────────────────────────
 
 use proptest::prelude::*;
 

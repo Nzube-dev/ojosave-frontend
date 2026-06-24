@@ -18,4 +18,22 @@ pub enum ContractError {
     PaymentNotDue        = 5,
     /// Authorization check failed (supplementary; require_auth() panics directly)
     Unauthorized         = 6,
+    /// Token transfer failed — subscriber lacks sufficient allowance.
+    /// The contract has attempted to transfer tokens but the subscriber's
+    /// approval to the contract is less than the payment amount.
+    /// Action: subscriber should increase allowance via token.approve()
+    InsufficientAllowance = 7,
+    /// Token transfer failed — subscriber lacks sufficient balance.
+    /// The subscriber's token balance is less than the payment amount.
+    /// Action: subscriber should acquire more tokens before retry
+    InsufficientBalance = 8,
+    /// Token transfer failed — authorization check failed on token contract.
+    /// The token contract rejected the transfer for permission/auth reasons
+    /// beyond standard balance/allowance checks (e.g., frozen account, paused token).
+    /// Action: check token contract state and permissions
+    TokenAuthorizationFailed = 9,
+    /// Token transfer panicked with unknown error.
+    /// The underlying token contract encountered an error that does not map
+    /// to standard allowance or balance issues. Check logs for details.
+    TokenTransferFailed = 10,
 }

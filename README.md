@@ -146,36 +146,66 @@ Removes all build artifacts from `contracts/target/`.
 
 ## Deployment
 
-### Setup identity
-
-```bash
-# Create a Stellar identity (one-time)
-stellar keys generate alice --network testnet
-
-# Fund it on testnet
-stellar keys fund alice --network testnet
-```
-
-### Deploy to testnet (default)
-
-```bash
-bash deploy/deploy.sh
-```
-
-The contract address is printed to stdout on success. All diagnostic output goes to stderr.
-
-### Deploy to mainnet
-
-```bash
-STELLAR_NETWORK=mainnet STELLAR_IDENTITY=your-identity bash deploy/deploy.sh
-```
-
-### Environment variables for deploy.sh
+### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `STELLAR_NETWORK` | `testnet` | `testnet` or `mainnet` |
-| `STELLAR_IDENTITY` | `alice` | Stellar CLI identity alias |
+| `STELLAR_NETWORK` | `testnet` | Target network: `testnet` or `mainnet` |
+| `STELLAR_IDENTITY` | `alice` | Stellar CLI identity alias to sign and pay fees |
+
+### Deploy to testnet
+
+```bash
+# 1. Create identity (one-time)
+stellar keys generate alice --network testnet
+
+# 2. Fund via Friendbot (testnet only — free)
+stellar keys fund alice --network testnet
+
+# 3. Deploy
+bash deploy/deploy.sh
+```
+
+The contract address is printed to stdout. All diagnostic output goes to stderr. Save the address — you will need it for the frontend `.env.local`.
+
+### Deploy to mainnet
+
+Mainnet requires a **real funded account**. There is no Friendbot.
+
+```bash
+# 1. Generate a mainnet identity (one-time)
+stellar keys generate my-mainnet-id --network mainnet
+
+# 2. Print the public key and fund it with real XLM (minimum ~2 XLM for base reserve + fee)
+stellar keys address my-mainnet-id
+
+# 3. Deploy
+STELLAR_NETWORK=mainnet STELLAR_IDENTITY=my-mainnet-id bash deploy/deploy.sh
+```
+
+On success the contract address is printed to stdout, e.g.:
+
+```
+CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+```
+
+Capture it directly if needed:
+
+```bash
+CONTRACT_ID=$(STELLAR_NETWORK=mainnet STELLAR_IDENTITY=my-mainnet-id bash deploy/deploy.sh)
+echo "Deployed: $CONTRACT_ID"
+```
+
+### Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---------|-------------|-----|
+| `ERROR: Contract build failed` | Rust toolchain or `wasm32` target missing | Run `rustup target add wasm32-unknown-unknown` |
+| `ERROR: WASM artifact not found` | Build produced no output | Check `make build` output; ensure `opt-level = "z"` is set in `Cargo.toml` |
+| `ERROR: Contract deployment failed` | Identity not funded or CLI not configured | Fund the account; verify with `stellar keys address <identity>` |
+| `ERROR: Unknown STELLAR_NETWORK value` | Typo in `STELLAR_NETWORK` | Allowed values are exactly `testnet` or `mainnet` |
+| Empty contract ID returned | RPC node unreachable or rate-limited | Retry; check RPC URL connectivity |
+| Transaction fee too low (mainnet) | Surge pricing during congestion | Re-run; the script uses the Stellar CLI default fee which self-adjusts |
 
 ---
 

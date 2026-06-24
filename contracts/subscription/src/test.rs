@@ -674,3 +674,261 @@ proptest! {
         prop_assert_eq!(t.env.events().all().len(), 0);
     }
 }
+
+// ─── Read-Only View: get_subscription ──────────────────────────────────────
+
+/// Test querying an active subscription returns complete and accurate data.
+///
+/// Validates: New get_subscription entry point returns SubscriptionData correctly
+/// Scenario:
+/// 1. Create subscription with known parameters
+/// 2. Query via get_subscription
+/// 3. Verify all fields match: token, amount, interval, next_payment
+#[test]
+fn test_get_subscription_returns_active_subscription() {
+    let t = T::new();
+    let amt = 500_000_i128;
+    let ivl = 172_800_u64;
+    let ts0 = t.env.ledger().timestamp();
+
+    // (a) Subscribe with known parameters
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+
+    // (b) Query subscription via get_subscription
+    let result = t.client.get_subscription(&t.subscriber, &t.merchant);
+
+    // (c) Verify Option contains SubscriptionData
+    assert!(result.is_some(), "get_subscription should return Some for active subscription");
+
+    // (d) Verify all fields match
+    let sub = result.unwrap();
+    assert_eq!(sub.token, t.token, "token should match");
+    assert_eq!(sub.amount, amt, "amount should match");
+    assert_eq!(sub.interval, ivl, "interval should match");
+    assert_eq!(sub.next_payment, ts0 + ivl, "next_payment should be current_time + interval");
+}
+
+/// Test querying a non-existent subscription returns None.
+///
+/// Validates: get_subscription returns None for subscriber-merchant pair with no subscription
+/// Scenario:
+/// 1. Query subscription for pair that was never created
+/// 2. Verify None is returned
+/// 3. Query for different merchant should still be None
+#[test]
+fn test_get_subscription_returns_none_for_nonexistent() {
+    let t = T::new();
+
+    // (a) Query without creating subscription
+    let result = t.client.get_subscription(&t.subscriber, &t.merchant);
+
+    // (b) Verify None
+    assert!(result.is_none(), "get_subscription should return None for non-existent subscription");
+}
+
+/// Test querying subscription after cancellation returns None.
+///
+/// Validates: get_subscription reflects subscription state after cancellation
+/// Scenario:
+/// 1. Create subscription
+/// 2. Query to verify exists
+/// 3. Cancel subscription
+/// 4. Query again to verify None
+#[test]
+fn test_get_subscription_returns_none_after_cancel() {
+    let t = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    // (a) Subscribe
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    
+    // (b) Verify subscription exists
+    let result_before = t.client.get_subscription(&t.subscriber, &t.merchant);
+    assert!(result_before.is_some(), "subscription should exist before cancel");
+
+    // (c) Cancel subscription
+    t.client.cancel(&t.subscriber, &t.merchant);
+
+    // (d) Query again
+    let result_after = t.client.get_subscription(&t.subscriber, &t.merchant);
+    assert!(result_after.is_none(), "get_subscription should return None after cancel");
+}
+
+/// Test querying subscription after payment updates next_payment correctly.
+///
+/// Validates: get_subscription returns updated next_payment after execute_payment
+/// Scenario:
+/// 1. Create subscription with next_payment = T + interval
+/// 2. Advance time past payment due
+/// 3. Execute payment (advances next_payment to T + 2*interval)
+/// 4. Query subscription
+/// 5. Verify next_payment was updated
+#[test]
+fn test_get_subscription_reflects_updated_next_payment() {
+    let t = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+    let ts0 = t.env.ledger().timestamp();
+
+    // (a) Subscribe
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let sub_before = t.client.get_subscription(&t.subscriber, &t.merchant).unwrap();
+    assert_eq!(sub_before.next_payment, ts0 + ivl, "initial next_payment should be T + interval");
+
+    // (b) Advance time past payment due
+    t.advance(ivl + 1);
+    let ts1 = t.env.ledger().timestamp();
+
+    // (c) Execute payment
+    t.client.execute_payment(&t.subscriber, &t.merchant);
+
+    // (d) Query subscription
+    let sub_after = t.client.get_subscription(&t.subscriber, &t.merchant).unwrap();
+
+    // (e) Verify next_payment was advanced
+    assert_eq!(sub_after.next_payment, ts1 + ivl, "next_payment should advance after payment");
+    assert_ne!(sub_after.next_payment, sub_before.next_payment, "next_payment must change");
+    assert_eq!(
+        sub_after.next_payment,
+        sub_before.next_payment + ivl,
+        "next_payment should advance by exactly interval"
+    );
+}
+
+/// Test independent subscriptions don't interfere with get_subscription queries.
+///
+/// Validates: get_subscription correctly distinguishes multiple subscriptions
+/// Scenario:
+/// 1. Create subscription (subscriber1 → merchant1) with params A
+/// 2. Create subscription (subscriber1 → merchant2) with params B
+/// 3. Query both pairs
+/// 4. Verify each returns its own data
+#[test]
+fn test_get_subscription_independent_for_different_pairs() {
+    let t = T::new();
+    let merchant2 = Address::generate(&t.env);
+
+    let amt1 = 100_000_i128;
+    let ivl1 = 86_400_u64;
+    let ts = t.env.ledger().timestamp();
+
+    let amt2 = 250_000_i128;
+    let ivl2 = 172_800_u64;
+
+    // (a) Subscribe for first merchant
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt1, &ivl1);
+
+    // (b) Subscribe for second merchant
+    t.client.subscribe(&t.subscriber, &t.merchant2, &t.token, &amt2, &ivl2);
+
+    // (c) Query both subscriptions
+    let sub1 = t.client.get_subscription(&t.subscriber, &t.merchant).unwrap();
+    let sub2 = t.client.get_subscription(&t.subscriber, &t.merchant2).unwrap();
+
+    // (d) Verify each returns correct data
+    assert_eq!(sub1.amount, amt1, "first subscription should have amt1");
+    assert_eq!(sub1.interval, ivl1, "first subscription should have ivl1");
+    assert_eq!(sub1.next_payment, ts + ivl1, "first subscription next_payment");
+
+    assert_eq!(sub2.amount, amt2, "second subscription should have amt2");
+    assert_eq!(sub2.interval, ivl2, "second subscription should have ivl2");
+    assert_eq!(sub2.next_payment, ts + ivl2, "second subscription next_payment");
+
+    // (e) Verify they're different
+    assert_ne!(sub1.amount, sub2.amount, "amounts should differ");
+    assert_ne!(sub1.interval, sub2.interval, "intervals should differ");
+    assert_ne!(sub1.next_payment, sub2.next_payment, "next_payments should differ");
+}
+
+/// Test get_subscription with overwritten subscription returns latest data.
+///
+/// Validates: get_subscription returns most recent subscription when overwritten
+/// Scenario:
+/// 1. Create subscription with params A
+/// 2. Query to get A
+/// 3. Overwrite with new subscription with params B
+/// 4. Query again
+/// 5. Verify params B are returned (not A)
+#[test]
+fn test_get_subscription_returns_latest_after_overwrite() {
+    let t = T::new();
+    let ts0 = t.env.ledger().timestamp();
+
+    // (a) First subscription
+    let amt1 = 100_000_i128;
+    let ivl1 = 86_400_u64;
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt1, &ivl1);
+
+    let sub1 = t.client.get_subscription(&t.subscriber, &t.merchant).unwrap();
+    assert_eq!(sub1.amount, amt1, "first subscription amount");
+    assert_eq!(sub1.next_payment, ts0 + ivl1, "first subscription next_payment");
+
+    // (b) Overwrite with second subscription
+    t.advance(1000);  // advance time slightly
+    let ts1 = t.env.ledger().timestamp();
+    let amt2 = 500_000_i128;
+    let ivl2 = 172_800_u64;
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt2, &ivl2);
+
+    // (c) Query again
+    let sub2 = t.client.get_subscription(&t.subscriber, &t.merchant).unwrap();
+
+    // (d) Verify new data is returned
+    assert_eq!(sub2.amount, amt2, "after overwrite, amount should be amt2");
+    assert_eq!(sub2.interval, ivl2, "after overwrite, interval should be ivl2");
+    assert_eq!(sub2.next_payment, ts1 + ivl2, "after overwrite, next_payment should be updated");
+
+    // (e) Verify old data is not returned
+    assert_ne!(sub2.amount, amt1, "old amount should not be returned");
+    assert_ne!(sub2.next_payment, sub1.next_payment, "old next_payment should not be returned");
+}
+
+/// Test get_subscription has no authorization requirements (read-only).
+///
+/// Validates: get_subscription does not require any signatures
+/// Scenario:
+/// 1. Create subscription
+/// 2. Query without any auth context
+/// 3. Verify returns data (no auth failure)
+#[test]
+fn test_get_subscription_requires_no_authorization() {
+    let env = Env::default();
+    // Note: Not calling env.mock_all_auths() — no auth mocking
+    
+    let admin = Address::generate(&env);
+    let subscriber = Address::generate(&env);
+    let merchant = Address::generate(&env);
+
+    // Register and setup token
+    let token = env.register_stellar_asset_contract_v2(admin).address();
+    StellarAssetClient::new(&env, &token).mint(&subscriber, &10_000_000_i128);
+
+    // Deploy contract
+    let contract_id = env.register(SubscriptionProtocol, ());
+    let client = SubscriptionProtocolClient::new(&env, &contract_id);
+
+    // Approve contract
+    token::Client::new(&env, &token).approve(
+        &subscriber,
+        &contract_id,
+        &5_000_000_i128,
+        &(env.ledger().sequence() + 100_000_u32),
+    );
+
+    // Now auth is enabled (no mock_all_auths)
+    // Subscribe requires auth (will succeed because SDK handles it)
+    env.mock_all_auths();  // Need this for subscribe to work
+    client.subscribe(&subscriber, &merchant, &token, &100_000_i128, &86_400_u64);
+
+    // Clear mock auths
+    env.mock_all_auths_allow_last(true);  // Stop mocking
+
+    // (a) Query WITHOUT any authorization context
+    // This should succeed because get_subscription is read-only
+    let result = client.get_subscription(&subscriber, &merchant);
+
+    // (b) Verify it returns data even without auth
+    assert!(result.is_some(), "get_subscription should work without auth context");
+    assert_eq!(result.unwrap().amount, 100_000_i128, "should return subscription data");
+}

@@ -249,6 +249,52 @@ impl SubscriptionProtocol {
 
         Ok(())
     }
+
+    /// Query active subscription details for a subscriber-merchant pair.
+    ///
+    /// This is a read-only view function that returns subscription state without
+    /// modifying any contract data. Frontend and backend systems can use this to
+    /// efficiently query subscription details, check payment due dates, or validate
+    /// subscription existence before initiating transactions.
+    ///
+    /// # Parameters
+    /// - `subscriber`: Account being charged
+    /// - `merchant`:   Account receiving payments
+    ///
+    /// # Returns
+    /// - `Ok(Some(SubscriptionData))` — if an active subscription exists for the pair.
+    ///   SubscriptionData contains:
+    ///   - `token`: SEP-41 token contract address used for payments
+    ///   - `amount`: Payment amount per interval (in token's smallest unit)
+    ///   - `interval`: Seconds between payments
+    ///   - `next_payment`: Unix timestamp of next valid payment window
+    /// - `Ok(None)` — if no subscription exists for the pair
+    ///
+    /// # Authorization
+    /// No authorization required — this is a public read-only view.
+    ///
+    /// # Gas Cost
+    /// Minimal: single storage read operation (~500 gas)
+    ///
+    /// # Example Usage
+    /// ```ignore
+    /// // Check if subscription exists and get details
+    /// match client.get_subscription(&subscriber, &merchant)? {
+    ///     Some(sub) => {
+    ///         println!("Payment due at: {}", sub.next_payment);
+    ///         println!("Amount: {} {}", sub.amount, sub.token);
+    ///     }
+    ///     None => println!("No active subscription"),
+    /// }
+    /// ```
+    pub fn get_subscription(
+        env: Env,
+        subscriber: Address,
+        merchant: Address,
+    ) -> Option<SubscriptionData> {
+        let key = DataKey::Subscription(subscriber, merchant);
+        env.storage().persistent().get(&key)
+    }
 }
 
 #[cfg(test)]

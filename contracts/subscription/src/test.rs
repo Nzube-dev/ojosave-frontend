@@ -946,3 +946,259 @@ fn load_test_bulk_execute_payment() {
         );
     }
 }
+
+// ─── Edge Case: Repeated Cancel After Removal ─────────────────────────────────
+
+/// Edge case test: Calling cancel() twice in a row returns NoActiveSubscription consistently.
+/// This validates the contract's deterministic behavior and guards against idempotent cancel mishandling.
+///
+/// Why: This edge case should be deterministic and documented. If a subscription is successfully
+/// cancelled once, a second cancel attempt on the same pair should cleanly return NoActiveSubscription.
+/// This ensures off-chain systems can safely retry cancel operations without side effects.
+#[test]
+fn test_repeated_cancel_after_removal_consistent() {
+    let t = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    // (a) Create subscription
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    assert!(t.has_sub(), "subscription must be created");
+
+    // (b) Cancel successfully — first call removes subscription
+    let result1 = t.client.try_cancel(&t.subscriber, &t.merchant);
+    assert!(result1.is_ok(), "first cancel must succeed");
+    assert!(!t.has_sub(), "subscription must be removed after first cancel");
+
+    // (c) Attempt to cancel again — should consistently return NoActiveSubscription
+    let result2 = t.client.try_cancel(&t.subscriber, &t.merchant);
+    assert!(
+        matches!(result2, Err(Ok(ContractError::NoActiveSubscription))),
+        "second cancel on non-existent subscription must return NoActiveSubscription"
+    );
+
+    // (d) Verify subscription is still absent
+    assert!(!t.has_sub(), "subscription must remain removed");
+}
+
+/// Edge case test: Calling cancel() multiple times (N=5) consistently returns NoActiveSubscription after removal.
+/// This stress-tests the contract's idempotent cancel behavior and guards against off-by-one errors.
+///
+/// Why: If a backend service retries a cancel operation multiple times (e.g., due to network latency),
+/// every call after the first should deterministically return NoActiveSubscription. This prevents
+/// silent failures or unpredictable state mutations.
+#[test]
+fn load_test_repeated_cancel_multiple_attempts() {
+    const N: usize = 5;
+
+    let t = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    // Create subscription once
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    assert!(t.has_sub(), "subscription must exist before any cancel");
+
+    // First cancel should succeed
+    let first_result = t.client.try_cancel(&t.subscriber, &t.merchant);
+    assert!(first_result.is_ok(), "first cancel must succeed");
+
+    // All subsequent cancels (N-1 attempts) should consistently fail with NoActiveSubscription
+    for attempt in 2..=N {
+        let result = t.client.try_cancel(&t.subscriber, &t.merchant);
+        assert!(
+            matches!(result, Err(Ok(ContractError::NoActiveSubscription))),
+            "cancel attempt #{} on removed subscription must return NoActiveSubscription",
+            attempt
+        );
+    }
+
+    // Subscription must remain permanently removed
+    assert!(!t.has_sub(), "subscription must be permanently removed after all cancel attempts");
+}
+
+/// Edge case test: cancel() then execute_payment() returns NoActiveSubscription (no state confusion).
+/// This validates that cancel properly removes subscription state and prevents future operations.
+///
+/// Why: A cancelled subscription must be completely removed from persistent storage.
+/// Attempting execute_payment() after cancellation should fail cleanly, not attempt to perform
+/// operations on stale data or return confusing errors.
+#[test]
+fn test_cancel_then_execute_payment_consistent_error() {
+    let t = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    // Create and cancel
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    t.client.cancel(&t.subscriber, &t.merchant);
+    assert!(!t.has_sub(), "subscription must be removed");
+
+    // Advance time past the original next_payment window
+    t.advance(ivl + 1);
+
+    // Attempt to execute payment on the cancelled subscription
+    let result = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(
+        matches!(result, Err(Ok(ContractError::NoActiveSubscription))),
+        "execute_payment after cancel must return NoActiveSubscription, not PaymentNotDue or other errors"
+    );
+
+    // Verify no tokens were transferred
+    assert_eq!(t.sub_bal(), 10_000_000_i128, "subscriber balance must be unchanged");
+    assert_eq!(t.mer_bal(), 0_i128, "merchant must not receive funds");
+}
+
+/// Edge case test: Multiple subscriber-merchant pairs verify independent cancel behavior (no cross-contamination).
+/// This validates that cancel on one pair doesn't affect other subscriptions.
+///
+/// Why: Storage keys are composite (subscriber, merchant). Cancelling one pair must not affect
+/// other pairs, even if they share a subscriber or merchant. This guards against key collision bugs.
+#[test]
+fn test_repeated_cancel_multi_pair_no_cross_contamination() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract_v2(admin.clone()).address();
+
+    let contract_id = env.register(SubscriptionProtocol, ());
+    let client = SubscriptionProtocolClient::new(&env, &contract_id);
+
+    // Two subscribers and two merchants
+    let sub1 = Address::generate(&env);
+    let sub2 = Address::generate(&env);
+    let mer1 = Address::generate(&env);
+    let mer2 = Address::generate(&env);
+
+    // Mint and approve for both subscribers
+    for sub in &[sub1.clone(), sub2.clone()] {
+        StellarAssetClient::new(&env, &token).mint(sub, &10_000_i128);
+        token::Client::new(&env, &token).approve(
+            sub,
+            &contract_id,
+            &5_000_i128,
+            &(env.ledger().sequence() + 100_000_u32),
+        );
+    }
+
+    let amt = 1_000_i128;
+    let ivl = 86_400_u64;
+
+    // Create four subscriptions (all combinations)
+    // (sub1, mer1), (sub1, mer2), (sub2, mer1), (sub2, mer2)
+    client.subscribe(&sub1, &mer1, &token, &amt, &ivl);
+    client.subscribe(&sub1, &mer2, &token, &amt, &ivl);
+    client.subscribe(&sub2, &mer1, &token, &amt, &ivl);
+    client.subscribe(&sub2, &mer2, &token, &amt, &ivl);
+
+    // Helper function to check if a subscription exists
+    let has_subscription = |sub: &Address, mer: &Address| -> bool {
+        env.storage()
+            .persistent()
+            .has(&DataKey::Subscription(sub.clone(), mer.clone()))
+    };
+
+    // All four should exist
+    assert!(has_subscription(&sub1, &mer1), "subscription (sub1, mer1) must exist");
+    assert!(has_subscription(&sub1, &mer2), "subscription (sub1, mer2) must exist");
+    assert!(has_subscription(&sub2, &mer1), "subscription (sub2, mer1) must exist");
+    assert!(has_subscription(&sub2, &mer2), "subscription (sub2, mer2) must exist");
+
+    // Cancel (sub1, mer1) twice
+    assert!(client.try_cancel(&sub1, &mer1).is_ok(), "first cancel (sub1, mer1) must succeed");
+    assert!(
+        matches!(client.try_cancel(&sub1, &mer1), Err(Ok(ContractError::NoActiveSubscription))),
+        "second cancel (sub1, mer1) must return NoActiveSubscription"
+    );
+
+    // Verify only (sub1, mer1) was removed
+    assert!(!has_subscription(&sub1, &mer1), "subscription (sub1, mer1) must be removed");
+    assert!(has_subscription(&sub1, &mer2), "subscription (sub1, mer2) must still exist");
+    assert!(has_subscription(&sub2, &mer1), "subscription (sub2, mer1) must still exist");
+    assert!(has_subscription(&sub2, &mer2), "subscription (sub2, mer2) must still exist");
+
+    // Cancel another pair twice
+    assert!(client.try_cancel(&sub2, &mer2).is_ok(), "first cancel (sub2, mer2) must succeed");
+    assert!(
+        matches!(client.try_cancel(&sub2, &mer2), Err(Ok(ContractError::NoActiveSubscription))),
+        "second cancel (sub2, mer2) must return NoActiveSubscription"
+    );
+
+    // Verify correct state after second pair removal
+    assert!(!has_subscription(&sub1, &mer1), "subscription (sub1, mer1) must still be removed");
+    assert!(has_subscription(&sub1, &mer2), "subscription (sub1, mer2) must still exist");
+    assert!(has_subscription(&sub2, &mer1), "subscription (sub2, mer1) must still exist");
+    assert!(!has_subscription(&sub2, &mer2), "subscription (sub2, mer2) must be removed");
+}
+
+/// Edge case test: No events emitted on repeated cancel calls after removal.
+/// This validates that the contract doesn't pollute the event log with spurious failures.
+///
+/// Why: Event indexers rely on consistent, minimal event streams. Failed cancel attempts
+/// should not emit events, keeping the log clean and deterministic.
+#[test]
+fn test_repeated_cancel_no_extra_events() {
+    let t = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    // Create subscription
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let events_after_subscribe = t.env.events().all().len();
+
+    // First cancel — should emit exactly 1 event
+    t.client.cancel(&t.subscriber, &t.merchant);
+    let events_after_first_cancel = t.env.events().all().len();
+    assert_eq!(events_after_first_cancel, events_after_subscribe + 1, "first cancel must emit 1 event");
+
+    // Repeated cancels (5 attempts) — should emit NO additional events
+    for attempt in 1..=5 {
+        let result = t.client.try_cancel(&t.subscriber, &t.merchant);
+        assert!(
+            matches!(result, Err(Ok(ContractError::NoActiveSubscription))),
+            "cancel attempt #{} must fail with NoActiveSubscription",
+            attempt
+        );
+    }
+
+    let final_event_count = t.env.events().all().len();
+    assert_eq!(
+        final_event_count, events_after_first_cancel,
+        "repeated cancel failures must not emit any additional events"
+    );
+}
+
+/// Edge case property test: For any valid subscription, repeated cancels always return
+/// NoActiveSubscription after the first successful cancellation.
+/// This property validates deterministic idempotent cancel behavior across all subscriptions.
+#[test]
+fn prop_repeated_cancel_is_deterministic(
+    amount   in 1_i128..=100_000_i128,
+    interval in 86_400_u64..=31_536_000_u64,
+) {
+    proptest!(|(amount in 1_i128..=100_000_i128,
+                interval in 86_400_u64..=31_536_000_u64)| {
+        let t = T::new();
+
+        // Create subscription
+        t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amount, &interval);
+
+        // First cancel must succeed
+        let result1 = t.client.try_cancel(&t.subscriber, &t.merchant);
+        prop_assert!(result1.is_ok(), "first cancel must succeed");
+
+        // All subsequent cancels must consistently fail with NoActiveSubscription
+        for _ in 0..5 {
+            let result = t.client.try_cancel(&t.subscriber, &t.merchant);
+            prop_assert!(
+                matches!(result, Err(Ok(ContractError::NoActiveSubscription))),
+                "repeated cancel must always return NoActiveSubscription"
+            );
+        }
+
+        // Subscription must remain permanently absent
+        prop_assert!(!t.has_sub(), "subscription must be permanently removed");
+        prop_ok!(())
+    });
+}

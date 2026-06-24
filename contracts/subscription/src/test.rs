@@ -123,6 +123,34 @@ fn test_payment_not_due_after_subscribe() {
     assert_eq!(t.sub_bal(), bal);
 }
 
+// ─── Extra: Execute payment before due time ───────────────────────────────────
+
+#[test]
+fn test_execute_payment_before_due_time() {
+    let t = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let bal_before = t.sub_bal();
+    let mer_bal_before = t.mer_bal();
+
+    // Advance time but not enough to reach next_payment
+    t.advance(ivl / 2);
+
+    let r = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(matches!(r, Err(Ok(ContractError::PaymentNotDue))));
+
+    // Verify no transfer occurred
+    assert_eq!(t.sub_bal(), bal_before);
+    assert_eq!(t.mer_bal(), mer_bal_before);
+
+    // Verify subscription remains unchanged
+    let d = t.get_sub();
+    assert_eq!(d.amount, amt);
+    assert_eq!(d.interval, ivl);
+}
+
 // ─── Requirement 13.3 — Execute after cancel ─────────────────────────────────
 
 #[test]

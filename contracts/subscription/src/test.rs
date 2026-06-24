@@ -194,6 +194,154 @@ fn test_subscribe_interval_too_long() {
     assert!(!t.has_sub());
 }
 
+// ─── Boundary Value Tests: Interval Edge Cases ────────────────────────────────
+
+/// Test interval exactly at lower boundary (86400 seconds = 1 day)
+/// This should be accepted as the minimum valid interval.
+#[test]
+fn test_subscribe_interval_exact_lower_boundary() {
+    let t = T::new();
+    let ivl = 86_400_u64; // exactly 1 day
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &ivl);
+    let d = t.get_sub();
+    assert_eq!(d.interval, ivl, "interval at exact lower boundary must be accepted");
+}
+
+/// Test interval one second below lower boundary (86399 seconds)
+/// This should be rejected with IntervalTooShort.
+#[test]
+fn test_subscribe_interval_one_below_lower_boundary() {
+    let t = T::new();
+    let ivl = 86_399_u64; // 1 second below minimum
+    let r = t.client.try_subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &ivl);
+    assert!(
+        matches!(r, Err(Ok(ContractError::IntervalTooShort))),
+        "interval 86399 must be rejected as IntervalTooShort"
+    );
+    assert!(!t.has_sub(), "subscription must not be created");
+}
+
+/// Test interval at zero (0 seconds)
+/// This should be rejected with IntervalTooShort.
+#[test]
+fn test_subscribe_interval_zero() {
+    let t = T::new();
+    let ivl = 0_u64;
+    let r = t.client.try_subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &ivl);
+    assert!(
+        matches!(r, Err(Ok(ContractError::IntervalTooShort))),
+        "interval 0 must be rejected as IntervalTooShort"
+    );
+    assert!(!t.has_sub(), "subscription must not be created for zero interval");
+}
+
+/// Test interval with very small value (1 second)
+/// This should be rejected with IntervalTooShort.
+#[test]
+fn test_subscribe_interval_one_second() {
+    let t = T::new();
+    let ivl = 1_u64;
+    let r = t.client.try_subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &ivl);
+    assert!(
+        matches!(r, Err(Ok(ContractError::IntervalTooShort))),
+        "interval 1 must be rejected as IntervalTooShort"
+    );
+    assert!(!t.has_sub(), "subscription must not be created for 1-second interval");
+}
+
+/// Test interval exactly at upper boundary (31536000 seconds = 365 days)
+/// This should be accepted as the maximum valid interval.
+#[test]
+fn test_subscribe_interval_exact_upper_boundary() {
+    let t = T::new();
+    let ivl = 31_536_000_u64; // exactly 365 days
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &ivl);
+    let d = t.get_sub();
+    assert_eq!(d.interval, ivl, "interval at exact upper boundary must be accepted");
+}
+
+/// Test interval one second above upper boundary (31536001 seconds)
+/// This should be rejected with IntervalTooLong.
+#[test]
+fn test_subscribe_interval_one_above_upper_boundary() {
+    let t = T::new();
+    let ivl = 31_536_001_u64; // 1 second above maximum
+    let r = t.client.try_subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &ivl);
+    assert!(
+        matches!(r, Err(Ok(ContractError::IntervalTooLong))),
+        "interval 31536001 must be rejected as IntervalTooLong"
+    );
+    assert!(!t.has_sub(), "subscription must not be created");
+}
+
+/// Test interval at maximum u64 value
+/// This should be rejected with IntervalTooLong.
+#[test]
+fn test_subscribe_interval_max_u64() {
+    let t = T::new();
+    let ivl = u64::MAX;
+    let r = t.client.try_subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &ivl);
+    assert!(
+        matches!(r, Err(Ok(ContractError::IntervalTooLong))),
+        "interval u64::MAX must be rejected as IntervalTooLong"
+    );
+    assert!(!t.has_sub(), "subscription must not be created");
+}
+
+/// Test interval at large value (1 year + 1 day = 31622400 seconds)
+/// This should be rejected with IntervalTooLong.
+#[test]
+fn test_subscribe_interval_just_over_one_year() {
+    let t = T::new();
+    let ivl = 31_622_400_u64; // 1 year + 1 day
+    let r = t.client.try_subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &ivl);
+    assert!(
+        matches!(r, Err(Ok(ContractError::IntervalTooLong))),
+        "interval exceeding 365 days must be rejected as IntervalTooLong"
+    );
+    assert!(!t.has_sub(), "subscription must not be created");
+}
+
+// ─── Combined Boundary Tests: Interval + Amount ───────────────────────────────
+
+/// Test that boundary intervals are properly validated regardless of amount.
+/// Uses edge case amount combined with minimum interval.
+#[test]
+fn test_subscribe_min_amount_min_interval_boundary() {
+    let t = T::new();
+    let amt = 1_i128; // minimum positive amount
+    let ivl = 86_400_u64; // exact lower boundary
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let d = t.get_sub();
+    assert_eq!(d.amount, amt);
+    assert_eq!(d.interval, ivl);
+}
+
+/// Test that maximum amount works with boundary intervals.
+/// Uses large amount with exact upper boundary interval.
+#[test]
+fn test_subscribe_large_amount_max_interval_boundary() {
+    let t = T::new();
+    let amt = i128::MAX / 2; // large but safe amount
+    let ivl = 31_536_000_u64; // exact upper boundary
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let d = t.get_sub();
+    assert_eq!(d.amount, amt);
+    assert_eq!(d.interval, ivl);
+}
+
+/// Test that zero interval is rejected even with valid amount.
+/// Ensures interval validation is independent and robust.
+#[test]
+fn test_subscribe_zero_interval_with_valid_amount() {
+    let t = T::new();
+    let amt = 100_000_i128; // valid positive amount
+    let ivl = 0_u64; // invalid zero interval
+    let r = t.client.try_subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    assert!(matches!(r, Err(Ok(ContractError::IntervalTooShort))));
+    assert!(!t.has_sub());
+}
+
 // ─── Extra: Overwrite existing subscription ───────────────────────────────────
 
 #[test]
@@ -251,6 +399,112 @@ fn test_cancel_and_resubscribe() {
     assert_ne!(d1.next_payment, d2.next_payment);
 }
 
+// ─── Requirement: Payment Transfer Events (Success & Failure) ─────────────────
+
+/// Test that a successful payment transfer emits the `payment_transfer_success` event.
+/// This event provides dedicated telemetry for off-chain services to track successful collections.
+#[test]
+fn test_execute_payment_emits_success_event() {
+    let t = T::new();
+    let amt = 500_i128;
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &86_400_u64);
+    t.advance(86_401);
+
+    let n_before = t.env.events().all().iter().filter(|e| e.0 == t.contract_id).count();
+    t.client.execute_payment(&t.subscriber, &t.merchant);
+    let n_after = t.env.events().all().iter().filter(|e| e.0 == t.contract_id).count();
+
+    assert_eq!(n_after, n_before + 1, "execute_payment should emit exactly 1 event");
+}
+
+/// Test that payment transfer fails with `TransferFailed` error when subscriber has insufficient balance.
+/// The subscription state should remain unchanged (eligible for retry), and a failure event should be emitted.
+#[test]
+fn test_execute_payment_insufficient_balance() {
+    let t = T::new();
+    let high_amt = 15_000_000_i128; // exceeds subscriber balance (10_000_000)
+
+    // Subscribe with an amount larger than subscriber balance
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &high_amt, &86_400_u64);
+    let d_before = t.get_sub();
+    let sub_balance_before = t.sub_bal();
+
+    t.advance(86_401);
+
+    // Attempt to execute payment — should fail due to insufficient balance
+    let result = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(
+        matches!(result, Err(Ok(ContractError::TransferFailed))),
+        "execute_payment should return TransferFailed when balance is insufficient"
+    );
+
+    // Verify subscription state is unchanged (allows retry)
+    let d_after = t.get_sub();
+    assert_eq!(d_before.next_payment, d_after.next_payment, "next_payment must not advance on failure");
+    assert_eq!(d_before.amount, d_after.amount, "amount must not change on failure");
+    assert_eq!(d_before.interval, d_after.interval, "interval must not change on failure");
+
+    // Verify no transfer occurred
+    assert_eq!(t.sub_bal(), sub_balance_before, "subscriber balance must not change on failed transfer");
+    assert_eq!(t.mer_bal(), 0_i128, "merchant must not receive funds on failed transfer");
+}
+
+/// Test that a payment transfer failure emits the `payment_transfer_failure` event.
+/// This event allows off-chain services to track failed collection attempts for reconciliation and retry logic.
+#[test]
+fn test_execute_payment_emits_failure_event_on_insufficient_balance() {
+    let t = T::new();
+    let high_amt = 15_000_000_i128; // exceeds subscriber balance
+
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &high_amt, &86_400_u64);
+    t.advance(86_401);
+
+    let n_before = t.env.events().all().iter().filter(|e| e.0 == t.contract_id).count();
+
+    // Attempt execute_payment — should fail and emit failure event
+    let _ = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+
+    let n_after = t.env.events().all().iter().filter(|e| e.0 == t.contract_id).count();
+    assert_eq!(n_after, n_before + 1, "failed execute_payment should emit exactly 1 failure event");
+}
+
+/// Test that subscription remains eligible for retry after a failed transfer.
+/// This validates that failed transfers do not advance the next_payment timestamp.
+#[test]
+fn test_subscription_retryable_after_failed_transfer() {
+    let t = T::new();
+    let high_amt = 15_000_000_i128; // exceeds subscriber balance
+    let ivl = 86_400_u64;
+
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &high_amt, &ivl);
+    let d = t.get_sub();
+    let original_next_payment = d.next_payment;
+
+    t.advance(86_401);
+
+    // First attempt fails
+    let r1 = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(matches!(r1, Err(Ok(ContractError::TransferFailed))));
+
+    let d_after_fail = t.get_sub();
+    assert_eq!(d_after_fail.next_payment, original_next_payment, "next_payment must not change on failure");
+
+    // Now give subscriber enough balance for a successful retry
+    let token_client = token::Client::new(&t.env, &t.token);
+    // Mint additional tokens to subscriber
+    StellarAssetClient::new(&t.env, &t.token).mint(&t.subscriber, &high_amt);
+    let new_sub_bal = token_client.balance(&t.subscriber);
+    assert!(new_sub_bal >= high_amt, "subscriber should now have sufficient balance");
+
+    // Second attempt should succeed
+    let r2 = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(r2.is_ok(), "retry should succeed after balance is replenished");
+
+    let d_after_success = t.get_sub();
+    assert!(d_after_success.next_payment > original_next_payment, "next_payment must advance on success");
+    assert_eq!(d_after_success.next_payment, original_next_payment + ivl, "next_payment should advance by interval");
+}
+
 // ─── Requirement 13.10 — Events ──────────────────────────────────────────────
 
 #[test]
@@ -294,13 +548,13 @@ fn test_no_events_on_payment_not_due() {
 }
 
 #[test]
-fn test_cancel_emits_no_event() {
+fn test_cancel_emits_event() {
     let t = T::new();
     t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &86_400_u64);
     let n = t.env.events().all().iter().filter(|e| e.0 == t.contract_id).count();
     t.client.cancel(&t.subscriber, &t.merchant);
     let n2 = t.env.events().all().iter().filter(|e| e.0 == t.contract_id).count();
-    assert_eq!(n, n2, "cancel must not emit any events");
+    assert_eq!(n2, n + 1, "cancel should emit exactly 1 event");
 }
 
 // ─── Transfer failure — state integrity ──────────────────────────────────────

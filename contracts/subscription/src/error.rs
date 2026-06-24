@@ -18,4 +18,6 @@ pub enum ContractError {
     PaymentNotDue        = 5,
     /// Authorization check failed (supplementary; require_auth() panics directly)
     Unauthorized         = 6,
+    /// `execute_payment` token transfer failed (insufficient balance or allowance)
+    TransferFailed       = 7,
 }

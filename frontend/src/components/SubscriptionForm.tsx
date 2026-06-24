@@ -446,10 +446,13 @@ export default function SubscriptionForm() {
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               disabled={isSubmitting}
-              aria-describedby={fieldErrors.amount ? 'err-amount' : undefined}
+              aria-describedby={`help-amount${fieldErrors.amount ? ' err-amount' : ''}`}
               aria-invalid={!!fieldErrors.amount}
               className={inputCls}
             />
+            <p id="help-amount" className="mt-2 text-xs text-gray-500 leading-relaxed">
+              Must be a positive integer (e.g. 100). Represents the number of token units transferred per interval.
+            </p>
             {fieldErrors.amount && (
               <p id="err-amount" role="alert" className="mt-2 text-xs text-red-400 font-medium">
                 {fieldErrors.amount}
@@ -471,12 +474,12 @@ export default function SubscriptionForm() {
               value={interval}
               onChange={(e) => setInterval(e.target.value)}
               disabled={isSubmitting}
-              aria-describedby={fieldErrors.interval ? 'err-interval' : undefined}
+              aria-describedby={`help-interval${fieldErrors.interval ? ' err-interval' : ''}`}
               aria-invalid={!!fieldErrors.interval}
               className={inputCls}
             />
-            <p className="mt-2 text-xs text-gray-500 leading-relaxed">
-              Default: 2 592 000 s (30 days). Range: 86 400 s – 31 536 000 s.
+            <p id="help-interval" className="mt-2 text-xs text-gray-500 leading-relaxed">
+              Seconds between payments. Min: 86 400 s (1 day), max: 31 536 000 s (1 year). Default: 2 592 000 s (30 days).
             </p>
             {fieldErrors.interval && (
               <p id="err-interval" role="alert" className="mt-2 text-xs text-red-400 font-medium">

@@ -167,6 +167,47 @@ npm run type-check
 
 ---
 
+## Event Indexing Architecture
+
+SorobanPay emits structured events via Soroban RPC for off-chain indexing. The contract publishes two core event types:
+
+- **`subscribe`** — Emitted when a subscription is created or updated. Signals the start of a recurring payment relationship.
+- **`executed`** — Emitted after a successful payment transfer and timestamp advance. Confirms payment collection.
+
+**Cancellation Detection:** The contract does not emit a cancellation event. Instead, off-chain indexers detect cancellations by the absence of `executed` events after a period exceeding the subscription interval.
+
+### Key Components
+
+| Component | Purpose |
+|-----------|---------|
+| **Event Sources** | Soroban RPC's `getEvents()` endpoint (topics: event type, subscriber, merchant) |
+| **Storage** | PostgreSQL, MongoDB, or time-series DBs for subscription state and payment history |
+| **Indexing Pattern** | Pull-based polling with cursor-based pagination; event sourcing + CQRS for complex workflows |
+| **Resumability** | Save RPC cursor in `indexer_state` to resume after failures |
+
+### Event Schema
+
+Each event contains:
+- **Topics:** `(symbol, subscriber_address, merchant_address)` — enables filtering by party or event type
+- **Data:** `amount: i128` — payment amount in token's smallest unit
+
+### Recommended Architecture
+
+For most SaaS and merchant dashboard use cases, a **PostgreSQL-backed pull indexer** is recommended. Characteristics:
+
+1. Poll Soroban RPC every 5–30 seconds for new events.
+2. Decode and persist to tables: `subscriptions`, `payments`, `indexer_state`.
+3. Detect cancellations via batch job: mark subscriptions inactive if no `executed` event in `2 × interval`.
+4. Serve queries via REST/GraphQL API for merchant dashboards.
+
+For high-volume payment streams, consider **event sourcing + CQRS** to maintain an immutable event log and multiple projections (subscription summary, revenue analytics, etc.).
+
+### Documentation
+
+For detailed guidance on event sources, storage options, indexing patterns, workflows, and error handling, see [docs/architecture.md](docs/architecture.md).
+
+---
+
 ## Security model
 
 - **Non-custodial**: The contract never holds token balances. Transfers go directly `subscriber → merchant` via SEP-41 `transfer`.

@@ -1544,3 +1544,99 @@ fn test_execute_payment_batch_ttl_extended_for_successful_payments() {
     // Note: Soroban test utilities don't expose TTL directly, but we verify the entry exists
     // and would not exist if TTL wasn't extended far enough.
 }
+
+// ─── Version Metadata Tests ──────────────────────────────────────────────────
+
+/// Test that the `version()` entry point returns the expected version string.
+/// This enables off-chain systems to verify contract compatibility.
+///
+/// Why: Version metadata is essential for off-chain services to determine
+/// if deployed contract is compatible with their integration expectations.
+#[test]
+fn test_version_returns_semver() {
+    let t = T::new();
+    let version = t.client.version();
+    // Should return "1.0.0" as a Symbol
+    let version_str = version.to_string();
+    assert!(version_str.contains("1"), "version must contain major version 1");
+}
+
+/// Test that the `contract_name()` entry point returns the expected contract identifier.
+/// This provides human-readable identification for off-chain integrations.
+///
+/// Why: Contract name helps off-chain services distinguish SorobanPay contracts
+/// from other Soroban contracts they may be indexing.
+#[test]
+fn test_contract_name_returns_identifier() {
+    let t = T::new();
+    let name = t.client.contract_name();
+    // Should return "SorobanPay" as a Symbol
+    let name_str = name.to_string();
+    assert!(name_str.contains("SorobanPay"), "contract name must identify as SorobanPay");
+}
+
+/// Test that version and name queries don't affect contract state.
+/// These are read-only operations that should be idempotent.
+///
+/// Why: Ensures metadata queries don't have side effects and can be called
+/// frequently for compatibility checks without state corruption.
+#[test]
+fn test_version_queries_are_stateless() {
+    let t = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    // Create a subscription
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let sub_before = t.get_sub();
+
+    // Query version multiple times
+    let _ = t.client.version();
+    let _ = t.client.version();
+    let _ = t.client.contract_name();
+    let _ = t.client.contract_name();
+
+    // Verify subscription state is unchanged
+    let sub_after = t.get_sub();
+    assert_eq!(sub_before.amount, sub_after.amount, "amount must not change after version queries");
+    assert_eq!(sub_before.interval, sub_after.interval, "interval must not change after version queries");
+    assert_eq!(sub_before.next_payment, sub_after.next_payment, "next_payment must not change after version queries");
+}
+
+/// Integration test: Verify version compatibility check workflow.
+/// This demonstrates the recommended off-chain pattern for verifying contract compatibility.
+///
+/// Why: Shows how off-chain systems should use version metadata to ensure
+/// they're interacting with a compatible contract version.
+#[test]
+fn test_version_compatibility_check_pattern() {
+    let t = T::new();
+
+    // Simulate off-chain compatibility verification
+    let version = t.client.version();
+    let name = t.client.contract_name();
+
+    // Verify contract identity
+    let name_str = name.to_string();
+    assert!(
+        name_str.contains("SorobanPay"),
+        "off-chain must verify contract name before proceeding"
+    );
+
+    // Verify version is compatible (v1.x.x)
+    let version_str = version.to_string();
+    assert!(
+        version_str.starts_with("1"),
+        "off-chain must verify major version compatibility"
+    );
+
+    // After verification, contract operations should proceed normally
+    let result = t.client.try_subscribe(
+        &t.subscriber,
+        &t.merchant,
+        &t.token,
+        &100_000_i128,
+        &86_400_u64,
+    );
+    assert!(result.is_ok(), "verified contract should accept subscription");
+}

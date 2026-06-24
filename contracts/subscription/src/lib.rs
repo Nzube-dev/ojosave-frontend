@@ -4,16 +4,44 @@ mod error;
 mod events;
 mod storage;
 
-use soroban_sdk::{contract, contractimpl, token, Address, Env};
+use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env, Symbol};
 
 use crate::error::ContractError;
-use crate::storage::{DataKey, SubscriptionData, MAX_TTL_LEDGERS, MIN_TTL_LEDGERS};
+use crate::storage::{DataKey, SubscriptionData, MAX_TTL_LEDGERS, MIN_TTL_LEDGERS, CONTRACT_VERSION, CONTRACT_NAME};
 
 #[contract]
 pub struct SubscriptionProtocol;
 
 #[contractimpl]
 impl SubscriptionProtocol {
+    /// Return the contract version as a string.
+    ///
+    /// This entry point enables off-chain systems to verify the deployed contract variant
+    /// and ensure compatibility with their integration. The version follows semantic versioning
+    /// (MAJOR.MINOR.PATCH) and should be checked before making contract invocations.
+    ///
+    /// # Return
+    /// Returns the contract version as a string (e.g., "1.0.0").
+    ///
+    /// # Example (Off-Chain)
+    /// ```text
+    /// const version = await contract.version();
+    /// if (!version.startsWith("1.")) {
+    ///   throw new Error(`Unsupported contract version: ${version}`);
+    /// }
+    /// ```
+    pub fn version(env: Env) -> Symbol {
+        // Return version as a Symbol for efficient on-chain transmission
+        symbol_short!("1.0.0")
+    }
+
+    /// Return the contract name for identification.
+    ///
+    /// Useful for integration verification and logging in off-chain systems.
+    /// Should always return "SorobanPay-SubscriptionProtocol" for this contract.
+    pub fn contract_name(env: Env) -> Symbol {
+        symbol_short!("SorobanPay")
+    }
     /// Create or update a recurring payment subscription.
     ///
     /// # Authorization

@@ -1,5 +1,18 @@
 use soroban_sdk::{Address, Env, Symbol};
 
+/// Emit the `contract_deployed` event to signal contract availability and version to off-chain services.
+///
+/// This event should be emitted during initial deployment or can be retrieved for historical reference.
+/// Topics:  (symbol("contract_deployed"))
+/// Data:    version string (e.g., "1.0.0")
+pub fn emit_contract_deployed(env: &Env, version: &str) {
+    // Note: We emit the version as a simple string event for off-chain indexing
+    env.events().publish(
+        (Symbol::new(env, "contract_deployed"),),
+        Symbol::new(env, version),
+    );
+}
+
 /// Emit the `subscribe` event after a subscription has been successfully stored.
 ///
 /// Topics:  (symbol("subscribe"), subscriber, merchant, token)

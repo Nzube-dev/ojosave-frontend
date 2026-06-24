@@ -186,6 +186,68 @@ function SuccessCard({
   );
 }
 
+// ─── Confirmation modal ────────────────────────────────────────────────────────
+
+function ConfirmModal({
+  merchantAddress,
+  tokenAddress,
+  amount,
+  interval,
+  onConfirm,
+  onCancel,
+}: {
+  merchantAddress: string;
+  tokenAddress: string;
+  amount: string;
+  interval: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const days = Math.round(Number(interval) / 86400);
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-title"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+    >
+      <div className="w-full max-w-md bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl p-6 space-y-5 text-white">
+        <h3 id="confirm-title" className="text-lg font-bold">Confirm subscription</h3>
+        <p className="text-sm text-gray-400">Review the details before authorizing the on-chain transaction.</p>
+
+        <dl className="bg-gray-800/60 rounded-lg divide-y divide-gray-700 text-sm">
+          {[
+            ['Merchant',  merchantAddress],
+            ['Token',     tokenAddress],
+            ['Amount',    `${amount} tokens`],
+            ['Interval',  `${days} day${days !== 1 ? 's' : ''} (${interval} s)`],
+          ].map(([label, value]) => (
+            <div key={label} className="flex flex-col gap-0.5 px-4 py-3">
+              <dt className="text-xs text-gray-400 font-medium">{label}</dt>
+              <dd className="break-all font-mono text-xs text-gray-100">{value}</dd>
+            </div>
+          ))}
+        </dl>
+
+        <div className="flex gap-3 pt-1">
+          <button
+            onClick={onCancel}
+            className="flex-1 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-800 py-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500"
+          >
+            Go back
+          </button>
+          <button
+            onClick={onConfirm}
+            className="flex-1 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 py-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400"
+          >
+            Confirm & authorize
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function SubscriptionForm() {
@@ -203,18 +265,20 @@ export default function SubscriptionForm() {
   const [fieldErrors, setFieldErrors]   = useState<FieldErrors>({});
   const [txError, setTxError]           = useState<string | null>(null);
   const [successData, setSuccessData]   = useState<SuccessData | null>(null);
+  const [showConfirm, setShowConfirm]   = useState(false);
 
   function resetForm() {
     setSuccessData(null);
     setTxError(null);
     setFieldErrors({});
+    setShowConfirm(false);
     setMerchantAddress('');
     setTokenAddress('');
     setAmount('');
     setInterval(String(DEFAULT_INTERVAL_SECONDS));
   }
 
-  async function handleSubmit(e: FormEvent) {
+  function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setTxError(null);
     setSuccessData(null);
@@ -222,6 +286,13 @@ export default function SubscriptionForm() {
     const errors = validateSubscriptionForm({ merchantAddress, tokenAddress, amount, interval });
     setFieldErrors(errors);
     if (!isFormValid(errors)) return;
+    if (!publicKey) return;
+
+    setShowConfirm(true);
+  }
+
+  async function confirmAndSubmit() {
+    setShowConfirm(false);
     if (!publicKey) return;
 
     setIsSubmitting(true);
@@ -263,6 +334,16 @@ export default function SubscriptionForm() {
 
   return (
     <div className="w-full max-w-lg mx-auto bg-gray-900 rounded-2xl shadow-xl p-5 sm:p-8 text-white">
+      {showConfirm && (
+        <ConfirmModal
+          merchantAddress={merchantAddress}
+          tokenAddress={tokenAddress}
+          amount={amount}
+          interval={interval}
+          onConfirm={confirmAndSubmit}
+          onCancel={() => setShowConfirm(false)}
+        />
+      )}
       <div className="flex items-center justify-between mb-2 gap-3">
         <h2 className="text-2xl sm:text-3xl font-bold">Create Subscription</h2>
         <span

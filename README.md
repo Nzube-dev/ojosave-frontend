@@ -181,19 +181,47 @@ STELLAR_NETWORK=mainnet STELLAR_IDENTITY=your-identity bash deploy/deploy.sh
 
 ## Frontend
 
-### Environment variables
+### 1. Install Freighter
 
-Create `frontend/.env.local` (copy from `frontend/.env.example`):
+Freighter is the Stellar browser wallet the app uses for signing transactions.
 
-```env
-NEXT_PUBLIC_CONTRACT_ID=CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-NEXT_PUBLIC_RPC_URL=https://soroban-testnet.stellar.org
-NEXT_PUBLIC_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
+1. Install the extension for [Chrome / Brave](https://chrome.google.com/webstore/detail/freighter/bcacfldlkkdogcmkkibnjlakofdplcbk) or [Firefox](https://addons.mozilla.org/en-US/firefox/addon/freighter/).
+2. Open Freighter and create or import a wallet.
+3. Click the network selector in the top-right and choose **Testnet** (for local development) or **Mainnet** (for production).
+4. Fund your testnet wallet via [Stellar Friendbot](https://laboratory.stellar.org/#account-creator?network=test).
+
+> **Mainnet note:** Freighter defaults to Mainnet. Make sure the network in Freighter matches `NEXT_PUBLIC_NETWORK_PASSPHRASE` in your `.env.local`, or transactions will be rejected.
+
+### 2. Configure environment variables
+
+Copy the example env file:
+
+```bash
+cp frontend/.env.example frontend/.env.local
 ```
 
-Replace `NEXT_PUBLIC_CONTRACT_ID` with the address output by `deploy.sh`.
+Edit `frontend/.env.local`:
 
-### Install and run
+```env
+# Contract address output by deploy.sh
+NEXT_PUBLIC_CONTRACT_ID=CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+# Testnet
+NEXT_PUBLIC_RPC_URL=https://soroban-testnet.stellar.org
+NEXT_PUBLIC_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
+
+# Mainnet (swap these two lines when deploying to mainnet)
+# NEXT_PUBLIC_RPC_URL=https://mainnet.stellar.validationcloud.io/v1/<YOUR_KEY>
+# NEXT_PUBLIC_NETWORK_PASSPHRASE=Public Global Stellar Network ; September 2015
+```
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `NEXT_PUBLIC_CONTRACT_ID` | ✅ | Deployed contract address (`C…`) from `deploy.sh` |
+| `NEXT_PUBLIC_RPC_URL` | ✅ | Soroban RPC endpoint |
+| `NEXT_PUBLIC_NETWORK_PASSPHRASE` | ✅ | Must match the network Freighter is set to |
+
+### 3. Install dependencies and run
 
 ```bash
 cd frontend
@@ -201,7 +229,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000 in a browser with Freighter installed.
+Open http://localhost:3000. Freighter will prompt for connection on the first interaction.
 
 ### Build for production
 
@@ -218,7 +246,17 @@ cd frontend
 npm run type-check
 ```
 
+### Troubleshooting Freighter
+
+| Symptom | Fix |
+|---------|-----|
+| "Wallet not connected" | Click the Freighter icon and approve the site connection |
+| Transaction rejected — wrong network | Match the Freighter network with `NEXT_PUBLIC_NETWORK_PASSPHRASE` |
+| "Insufficient balance" | Fund the account (Friendbot on testnet; real XLM on mainnet) |
+| Freighter not detected | Ensure the extension is installed and the page is served over `http://localhost` or `https://` |
+
 ---
+
 
 ## Contract entry points
 

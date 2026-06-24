@@ -445,3 +445,102 @@ proptest! {
         prop_assert_eq!(t.env.events().all().len(), 0);
     }
 }
+
+// ─── Interval boundary tests ──────────────────────────────────────────────────
+//
+// Verifies off-by-one correctness at the exact edges of the allowed interval
+// range [86_400, 31_536_000] seconds.
+
+/// 86_399 — one second below the minimum — must be rejected.
+#[test]
+fn test_interval_one_below_min_rejected() {
+    let t = T::new();
+    let r = t.client.try_subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &86_399_u64);
+    assert!(matches!(r, Err(Ok(ContractError::IntervalTooShort))));
+    assert!(!t.has_sub());
+}
+
+/// 86_400 — exactly the minimum — must be accepted.
+#[test]
+fn test_interval_at_min_accepted() {
+    let t = T::new();
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &86_400_u64);
+    assert_eq!(t.get_sub().interval, 86_400_u64);
+}
+
+/// 86_401 — one second above the minimum — must be accepted.
+#[test]
+fn test_interval_one_above_min_accepted() {
+    let t = T::new();
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &86_401_u64);
+    assert_eq!(t.get_sub().interval, 86_401_u64);
+}
+
+/// 31_535_999 — one second below the maximum — must be accepted.
+#[test]
+fn test_interval_one_below_max_accepted() {
+    let t = T::new();
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &31_535_999_u64);
+    assert_eq!(t.get_sub().interval, 31_535_999_u64);
+}
+
+/// 31_536_000 — exactly the maximum — must be accepted.
+#[test]
+fn test_interval_at_max_accepted() {
+    let t = T::new();
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &31_536_000_u64);
+    assert_eq!(t.get_sub().interval, 31_536_000_u64);
+}
+
+/// 31_536_001 — one second above the maximum — must be rejected.
+#[test]
+fn test_interval_one_above_max_rejected() {
+    let t = T::new();
+    let r = t.client.try_subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &31_536_001_u64);
+    assert!(matches!(r, Err(Ok(ContractError::IntervalTooLong))));
+    assert!(!t.has_sub());
+}
+
+/// Zero — far below minimum — must be rejected.
+#[test]
+fn test_interval_zero_rejected() {
+    let t = T::new();
+    let r = t.client.try_subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &0_u64);
+    assert!(matches!(r, Err(Ok(ContractError::IntervalTooShort))));
+    assert!(!t.has_sub());
+}
+
+proptest! {
+    /// Property: every value in (86_400, 31_536_000) is accepted — interior of range.
+    #[test]
+    fn prop_interior_interval_accepted(
+        amount   in 1_i128..=100_000_i128,
+        interval in 86_401_u64..31_536_000_u64,
+    ) {
+        let t = T::new();
+        t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amount, &interval);
+        prop_assert_eq!(t.get_sub().interval, interval);
+    }
+
+    /// Property: values in [0, 86_399] are always rejected with IntervalTooShort.
+    #[test]
+    fn prop_below_min_always_rejected(
+        amount   in 1_i128..=100_000_i128,
+        interval in 0_u64..86_400_u64,
+    ) {
+        let t = T::new();
+        let r = t.client.try_subscribe(&t.subscriber, &t.merchant, &t.token, &amount, &interval);
+        prop_assert!(matches!(r, Err(Ok(ContractError::IntervalTooShort))));
+    }
+
+    /// Property: values in [31_536_001, u64::MAX/2] are always rejected with IntervalTooLong.
+    #[test]
+    fn prop_above_max_always_rejected(
+        amount   in 1_i128..=100_000_i128,
+        interval in 31_536_001_u64..=u64::MAX / 2,
+    ) {
+        let t = T::new();
+        let r = t.client.try_subscribe(&t.subscriber, &t.merchant, &t.token, &amount, &interval);
+        prop_assert!(matches!(r, Err(Ok(ContractError::IntervalTooLong))));
+    }
+}

@@ -73,7 +73,7 @@ impl SubscriptionProtocol {
             .extend_ttl(&key, MIN_TTL_LEDGERS, MAX_TTL_LEDGERS);
 
         // 7. Emit event — after all state mutations have succeeded.
-        events::emit_subscribe(&env, &subscriber, &merchant, amount);
+        events::emit_subscribe(&env, &subscriber, &merchant, &token, amount);
 
         Ok(())
     }
@@ -130,7 +130,7 @@ impl SubscriptionProtocol {
             .extend_ttl(&key, MIN_TTL_LEDGERS, MAX_TTL_LEDGERS);
 
         // 8. Emit event — after all mutations and transfer have succeeded.
-        events::emit_executed(&env, &subscriber, &merchant, data.amount);
+        events::emit_executed(&env, &subscriber, &merchant, &data.token, data.amount);
 
         Ok(())
     }

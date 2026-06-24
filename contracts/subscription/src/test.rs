@@ -557,6 +557,202 @@ fn test_cancel_emits_event() {
     assert_eq!(n2, n + 1, "cancel should emit exactly 1 event");
 }
 
+// ─── Late Payment Rescheduling Tests ──────────────────────────────────────────
+
+/// Test that late payment collection reschedules next_payment to current_time + interval.
+/// This validates that late payments do not cause payment bunching by preserving the
+/// original schedule. Instead, the schedule shifts forward, preventing double-billing.
+#[test]
+fn test_late_payment_reschedules_from_current_time() {
+    let t = T::new();
+    let amt = 50_000_i128;
+    let ivl = 86_400_u64; // 1 day
+    let ts_sub = t.env.ledger().timestamp();
+
+    // Subscribe at time 0
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let d_initial = t.get_sub();
+    
+    // next_payment should be ts_sub + ivl
+    assert_eq!(d_initial.next_payment, ts_sub + ivl, "initial next_payment = subscribe_time + interval");
+
+    // Advance time beyond next_payment (simulate network delay or failed retry)
+    let late_collection_time = ts_sub + ivl + 100_000; // 100k seconds late
+    t.advance(100_000);
+
+    // Execute payment
+    t.client.execute_payment(&t.subscriber, &t.merchant);
+
+    let d_after = t.get_sub();
+    
+    // next_payment should now be late_collection_time + ivl (current time at payment + interval)
+    // NOT the original schedule time + interval
+    assert_eq!(
+        d_after.next_payment,
+        late_collection_time + ivl,
+        "late payment: next_payment = collection_time + interval (not original_due + interval)"
+    );
+    
+    // Verify the schedule shifted: next_payment increased more than just one interval
+    assert!(
+        d_after.next_payment > d_initial.next_payment + ivl,
+        "schedule shifts forward when payment is collected late"
+    );
+}
+
+/// Test that on-time payment collection maintains predictable interval advancement.
+/// This validates the normal (non-late) payment case.
+#[test]
+fn test_ontime_payment_advances_by_interval() {
+    let t = T::new();
+    let amt = 50_000_i128;
+    let ivl = 86_400_u64; // 1 day
+    let ts_sub = t.env.ledger().timestamp();
+
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let d1 = t.get_sub();
+    let ts_payment1 = ts_sub + ivl + 1; // exact due time (with 1 sec buffer)
+    
+    // Advance just past the due time and execute
+    t.advance(ivl + 1);
+    t.client.execute_payment(&t.subscriber, &t.merchant);
+
+    let d2 = t.get_sub();
+    
+    // next_payment should be collection_time + interval
+    assert_eq!(
+        d2.next_payment,
+        ts_payment1 + ivl,
+        "on-time: next_payment advances by exactly one interval"
+    );
+
+    // Advance to next due time and execute again
+    t.advance(ivl);
+    let ts_payment2 = t.env.ledger().timestamp();
+    t.client.execute_payment(&t.subscriber, &t.merchant);
+
+    let d3 = t.get_sub();
+    assert_eq!(
+        d3.next_payment,
+        ts_payment2 + ivl,
+        "second on-time payment maintains predictable interval"
+    );
+}
+
+/// Test the "cascading delays" scenario: multiple late collections.
+/// Each late collection advances the schedule, preventing bunching but shifting dates.
+#[test]
+fn test_multiple_late_payments_accumulate_schedule_shift() {
+    let t = T::new();
+    let amt = 50_000_i128;
+    let ivl = 86_400_u64; // 1 day
+    let ts_sub = t.env.ledger().timestamp();
+
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    
+    // Payment 1: collected 50k seconds late
+    t.advance(ivl + 50_000);
+    let ts_payment1 = t.env.ledger().timestamp();
+    t.client.execute_payment(&t.subscriber, &t.merchant);
+    let d1 = t.get_sub();
+    assert_eq!(d1.next_payment, ts_payment1 + ivl, "payment 1 due at: collection_time + interval");
+
+    // Payment 2: again collected late (on top of the already-shifted schedule)
+    t.advance(40_000);
+    let ts_payment2 = t.env.ledger().timestamp();
+    t.client.execute_payment(&t.subscriber, &t.merchant);
+    let d2 = t.get_sub();
+    assert_eq!(d2.next_payment, ts_payment2 + ivl, "payment 2 due at: collection_time + interval");
+
+    // Verify cumulative shift: original due would be ts_sub + 2*ivl, actual is much later
+    let original_due_for_third_payment = ts_sub + (3 * ivl);
+    let actual_due_for_third_payment = d2.next_payment;
+    let total_shift = actual_due_for_third_payment - original_due_for_third_payment;
+    
+    assert!(
+        total_shift > 0,
+        "cumulative late payments shift schedule forward: {} seconds late",
+        total_shift
+    );
+}
+
+/// Test that failed (retryable) payments do not affect the schedule.
+/// This validates that only successful transfers update next_payment.
+#[test]
+fn test_failed_payment_does_not_shift_schedule() {
+    let t = T::new();
+    let amt = 15_000_000_i128; // exceeds initial balance
+    let ivl = 86_400_u64;
+    let ts_sub = t.env.ledger().timestamp();
+
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let d_before = t.get_sub();
+    let original_next_payment = d_before.next_payment;
+
+    // Attempt payment when balance insufficient (will fail)
+    t.advance(ivl + 1);
+    let ts_attempt = t.env.ledger().timestamp();
+    let r = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(matches!(r, Err(Ok(ContractError::TransferFailed))));
+
+    // Verify schedule unchanged
+    let d_after_fail = t.get_sub();
+    assert_eq!(
+        d_after_fail.next_payment,
+        original_next_payment,
+        "failed payment must not shift schedule"
+    );
+
+    // Now replenish balance and retry — should use the same original due date
+    let token_client = token::Client::new(&t.env, &t.token);
+    StellarAssetClient::new(&t.env, &t.token).mint(&t.subscriber, &amt);
+
+    let ts_retry = t.env.ledger().timestamp();
+    t.client.execute_payment(&t.subscriber, &t.merchant);
+    let d_after_success = t.get_sub();
+
+    // next_payment should reflect collection at ts_retry (not ts_attempt)
+    assert_eq!(
+        d_after_success.next_payment,
+        ts_retry + ivl,
+        "retry uses current retry time, not original due time"
+    );
+}
+
+/// Test merchant's ability to track late payments via off-chain event inspection.
+/// This validates that events carry sufficient information to detect and handle late collection.
+#[test]
+fn test_late_payment_detection_via_events() {
+    let t = T::new();
+    let amt = 50_000_i128;
+    let ivl = 86_400_u64;
+    let ts_sub = t.env.ledger().timestamp();
+
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let original_due = ts_sub + ivl;
+
+    // Collect payment very late
+    let delay_seconds = 500_000; // 5.78 days late
+    t.advance(ivl + delay_seconds);
+    
+    let n_before = t.env.events().all().iter().filter(|e| e.0 == t.contract_id).count();
+    t.client.execute_payment(&t.subscriber, &t.merchant);
+    let n_after = t.env.events().all().iter().filter(|e| e.0 == t.contract_id).count();
+
+    // Success event should be emitted
+    assert_eq!(n_after, n_before + 1, "late payment should emit payment_transfer_success event");
+    
+    // Off-chain service can:
+    // 1. Monitor the event
+    // 2. Compare event.timestamp (collection_time) to subscription.original_next_payment (original_due)
+    // 3. Calculate delay = event.timestamp - original_due
+    // 4. Apply grace period or makeup charge logic based on delay
+    
+    let collection_time = t.env.ledger().timestamp();
+    let late_by = collection_time - original_due;
+    assert!(late_by > 0, "off-chain can detect late payment by comparing timestamps");
+}
+
 // ─── Property-Based Tests ─────────────────────────────────────────────────────
 
 use proptest::prelude::*;

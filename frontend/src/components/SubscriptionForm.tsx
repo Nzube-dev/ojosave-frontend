@@ -263,7 +263,20 @@ export default function SubscriptionForm() {
 
   return (
     <div className="w-full max-w-lg mx-auto bg-gray-900 rounded-2xl shadow-xl p-5 sm:p-8 text-white">
-      <h2 className="text-2xl sm:text-3xl font-bold mb-2">Create Subscription</h2>
+      <div className="flex items-center justify-between mb-2 gap-3">
+        <h2 className="text-2xl sm:text-3xl font-bold">Create Subscription</h2>
+        <span
+          aria-label={publicKey ? 'Wallet connected' : 'Wallet disconnected'}
+          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold shrink-0 ${
+            publicKey
+              ? 'bg-green-900/60 text-green-300 border border-green-600/50'
+              : 'bg-gray-700/60 text-gray-400 border border-gray-600/50'
+          }`}
+        >
+          <span className={`h-2 w-2 rounded-full ${publicKey ? 'bg-green-400' : 'bg-gray-500'}`} aria-hidden="true" />
+          {publicKey ? 'Connected' : 'Disconnected'}
+        </span>
+      </div>
       <p className="text-gray-400 text-sm mb-8 leading-relaxed">
         Authorize a recurring on-chain payment using your Freighter wallet.
       </p>

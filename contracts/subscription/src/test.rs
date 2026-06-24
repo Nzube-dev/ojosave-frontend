@@ -303,6 +303,87 @@ fn test_cancel_emits_no_event() {
     assert_eq!(n, n2, "cancel must not emit any events");
 }
 
+// ─── Transfer failure — state integrity ──────────────────────────────────────
+
+/// Sets up a subscription that is past-due, then reduces the allowance to zero
+/// so the token transfer will fail. Verifies subscription state is unchanged.
+#[test]
+fn test_execute_payment_fails_on_zero_allowance_state_unchanged() {
+    let t   = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let sub_before = t.get_sub();
+    let sb = t.sub_bal();
+    let mb = t.mer_bal();
+
+    // Revoke the allowance entirely.
+    token::Client::new(&t.env, &t.token).approve(
+        &t.subscriber,
+        &t.contract_id,
+        &0_i128,
+        &(t.env.ledger().sequence() + 100_000_u32),
+    );
+
+    t.advance(ivl + 1);
+
+    // Transfer will panic inside the token contract — host error, not ContractError.
+    let r = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(r.is_err(), "execute_payment must fail when allowance is zero");
+
+    // State must be unchanged.
+    let sub_after = t.get_sub();
+    assert_eq!(sub_after.next_payment, sub_before.next_payment,
+        "next_payment must not advance on failed transfer");
+    assert_eq!(t.sub_bal(), sb, "subscriber balance must be unchanged");
+    assert_eq!(t.mer_bal(), mb, "merchant balance must be unchanged");
+
+    // No extra contract events.
+    let events_after: Vec<_> = t.env.events().all().iter()
+        .filter(|e| e.0 == t.contract_id).collect();
+    // subscribe emitted 1 event; no `executed` event should have been added.
+    assert_eq!(events_after.len(), 1, "no executed event on failed transfer");
+}
+
+/// Sets up a subscription whose amount exceeds the subscriber's entire balance
+/// so the token transfer will fail due to insufficient funds.
+#[test]
+fn test_execute_payment_fails_on_insufficient_balance_state_unchanged() {
+    let t = T::new();
+    // Amount larger than the 10_000_000 minted to subscriber.
+    let amt = 20_000_000_i128;
+    let ivl = 86_400_u64;
+
+    // Approve a large allowance so the failure is balance-driven, not allowance-driven.
+    token::Client::new(&t.env, &t.token).approve(
+        &t.subscriber,
+        &t.contract_id,
+        &amt,
+        &(t.env.ledger().sequence() + 100_000_u32),
+    );
+
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let sub_before = t.get_sub();
+    let sb = t.sub_bal();
+    let mb = t.mer_bal();
+
+    t.advance(ivl + 1);
+
+    let r = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(r.is_err(), "execute_payment must fail when balance is insufficient");
+
+    let sub_after = t.get_sub();
+    assert_eq!(sub_after.next_payment, sub_before.next_payment,
+        "next_payment must not advance on failed transfer");
+    assert_eq!(t.sub_bal(), sb, "subscriber balance must be unchanged");
+    assert_eq!(t.mer_bal(), mb, "merchant balance must be unchanged");
+
+    let events_after: Vec<_> = t.env.events().all().iter()
+        .filter(|e| e.0 == t.contract_id).collect();
+    assert_eq!(events_after.len(), 1, "no executed event on failed transfer");
+}
+
 // ─── Property-Based Tests ─────────────────────────────────────────────────────
 
 use proptest::prelude::*;

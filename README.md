@@ -19,6 +19,45 @@ SorobanPay
 2. **Frontend** — Next.js 14 App Router + Freighter wallet integration + Tailwind CSS.
 3. **Build & Deploy** — GNU Makefile + bash deployment script with testnet/mainnet switching.
 
+### System flow
+
+```
++------------------+        +---------------------+        +----------------+
+|   Subscriber     |        |       Merchant      |        | Optional       |
+|  (Freighter)     |<------>|   (Service Owner)   |<------>| Backend/Indexer|
++--------+---------+  Web   +----------+-----------+  API   +--------+-------+
+         |                       Web                         |    ^
+         |                        |                         |    |
+         v                        v                         |    |
++--------+--------+        +--------+--------+               |    |
+|   Frontend       |        | Merchant Portal  |---------------+    |
+|  (Next.js + TS)  |        | or Admin Panel    |                      |
++--------+--------+        +-------------------+                      |
+         |                                                                 |
+         | contract ops                                                    |
+         v                                                                 |
++--------+--------+                                                       |
+| Soroban Contract |------------------------------------------------------+
+| subscribe()       |
+| execute_payment() |
+| cancel()          |
++--------+--------+
+         |
+         v
++--------+--------+
+| Soroban Ledger   |
+| + PersistentStore |
+| + SEP-41 Token    |
++------------------+
+```
+
+**Flow summary:**
+1. **Subscriber** signs transactions via Freighter in the Next.js frontend.
+2. **Frontend** dispatches contract calls (`subscribe`, `cancel`, `execute_payment`) through the Stellar RPC.
+3. **Soroban Contract** executes on-chain, interacting with the **SEP-41 Token** for allowances/transfers and persisting state in the **Soroban Ledger**.
+4. **Structured events** emitted by the contract can be indexed by an **optional backend** for analytics, history, or notification triggers.
+5. **Merchant** may use a dedicated portal or admin panel to trigger `execute_payment` and view subscription state.
+
 ---
 
 ## Prerequisites
@@ -43,11 +82,55 @@ make build
 
 Compiles the Rust contract to `contracts/target/wasm32-unknown-unknown/release/soroban_subscription_contract.wasm` using the `--release` profile (`opt-level = "z"`, `lto = true`).
 
+**Override defaults at the command line:**
+
+```bash
+make build TARGET_TRIPLE=<triple> PROFILE=<debug|release>
+```
+
+Example — cross-compile for a different WASM target:
+
+```bash
+make build TARGET_TRIPLE=wasm32-unknown-unknown PROFILE=release
+```
+
+### Extending the Makefile for new targets
+
+The Makefile exposes two override-friendly variables:
+
+- `TARGET_TRIPLE` — Rust compilation target (default: `wasm32-unknown-unknown`)
+- `PROFILE` — Cargo profile name (default: `release`)
+
+**To add a new compilation target:**
+
+1. Install the Rust target with `rustup target add <triple>`.
+2. Build with `make build TARGET_TRIPLE=<triple>`.
+3. The output artifact lands under `contracts/target/<triple>/<profile>/soroban_subscription_contract.wasm`.
+
+Example — add a native host build target:
+
+```bash
+make build TARGET_TRIPLE=x86_64-unknown-linux-gnu PROFILE=debug
+```
+
+**Caution:** `make test` always runs via the native host (`cargo test` without `--target`). Do not set `TARGET_TRIPLE` for testing; WASM cross-targets cannot execute tests.
+
 ### Test
 
 ```bash
 make test
 ```
+
+Equivalent to:
+
+```bash
+cargo test \
+  --manifest-path contracts/subscription/Cargo.toml
+```
+
+**Prerequisites:**
+- Rust stable toolchain
+- `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`)
 
 Runs the full test suite: unit tests (lifecycle, error paths, auth, events) and property-based tests (time-lock, double-payment prevention, balance invariant, and more).
 

@@ -186,6 +186,68 @@ function SuccessCard({
   );
 }
 
+// ─── Confirmation modal ────────────────────────────────────────────────────────
+
+function ConfirmModal({
+  merchantAddress,
+  tokenAddress,
+  amount,
+  interval,
+  onConfirm,
+  onCancel,
+}: {
+  merchantAddress: string;
+  tokenAddress: string;
+  amount: string;
+  interval: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const days = Math.round(Number(interval) / 86400);
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-title"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+    >
+      <div className="w-full max-w-md bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl p-6 space-y-5 text-white">
+        <h3 id="confirm-title" className="text-lg font-bold">Confirm subscription</h3>
+        <p className="text-sm text-gray-400">Review the details before authorizing the on-chain transaction.</p>
+
+        <dl className="bg-gray-800/60 rounded-lg divide-y divide-gray-700 text-sm">
+          {[
+            ['Merchant',  merchantAddress],
+            ['Token',     tokenAddress],
+            ['Amount',    `${amount} tokens`],
+            ['Interval',  `${days} day${days !== 1 ? 's' : ''} (${interval} s)`],
+          ].map(([label, value]) => (
+            <div key={label} className="flex flex-col gap-0.5 px-4 py-3">
+              <dt className="text-xs text-gray-400 font-medium">{label}</dt>
+              <dd className="break-all font-mono text-xs text-gray-100">{value}</dd>
+            </div>
+          ))}
+        </dl>
+
+        <div className="flex gap-3 pt-1">
+          <button
+            onClick={onCancel}
+            className="flex-1 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-800 py-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500"
+          >
+            Go back
+          </button>
+          <button
+            onClick={onConfirm}
+            className="flex-1 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 py-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400"
+          >
+            Confirm & authorize
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function SubscriptionForm() {
@@ -203,18 +265,20 @@ export default function SubscriptionForm() {
   const [fieldErrors, setFieldErrors]   = useState<FieldErrors>({});
   const [txError, setTxError]           = useState<string | null>(null);
   const [successData, setSuccessData]   = useState<SuccessData | null>(null);
+  const [showConfirm, setShowConfirm]   = useState(false);
 
   function resetForm() {
     setSuccessData(null);
     setTxError(null);
     setFieldErrors({});
+    setShowConfirm(false);
     setMerchantAddress('');
     setTokenAddress('');
     setAmount('');
     setInterval(String(DEFAULT_INTERVAL_SECONDS));
   }
 
-  async function handleSubmit(e: FormEvent) {
+  function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setTxError(null);
     setSuccessData(null);
@@ -222,6 +286,13 @@ export default function SubscriptionForm() {
     const errors = validateSubscriptionForm({ merchantAddress, tokenAddress, amount, interval });
     setFieldErrors(errors);
     if (!isFormValid(errors)) return;
+    if (!publicKey) return;
+
+    setShowConfirm(true);
+  }
+
+  async function confirmAndSubmit() {
+    setShowConfirm(false);
     if (!publicKey) return;
 
     setIsSubmitting(true);
@@ -263,7 +334,30 @@ export default function SubscriptionForm() {
 
   return (
     <div className="w-full max-w-lg mx-auto bg-gray-900 rounded-2xl shadow-xl p-5 sm:p-8 text-white">
-      <h2 className="text-2xl sm:text-3xl font-bold mb-2">Create Subscription</h2>
+      {showConfirm && (
+        <ConfirmModal
+          merchantAddress={merchantAddress}
+          tokenAddress={tokenAddress}
+          amount={amount}
+          interval={interval}
+          onConfirm={confirmAndSubmit}
+          onCancel={() => setShowConfirm(false)}
+        />
+      )}
+      <div className="flex items-center justify-between mb-2 gap-3">
+        <h2 className="text-2xl sm:text-3xl font-bold">Create Subscription</h2>
+        <span
+          aria-label={publicKey ? 'Wallet connected' : 'Wallet disconnected'}
+          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold shrink-0 ${
+            publicKey
+              ? 'bg-green-900/60 text-green-300 border border-green-600/50'
+              : 'bg-gray-700/60 text-gray-400 border border-gray-600/50'
+          }`}
+        >
+          <span className={`h-2 w-2 rounded-full ${publicKey ? 'bg-green-400' : 'bg-gray-500'}`} aria-hidden="true" />
+          {publicKey ? 'Connected' : 'Disconnected'}
+        </span>
+      </div>
       <p className="text-gray-400 text-sm mb-8 leading-relaxed">
         Authorize a recurring on-chain payment using your Freighter wallet.
       </p>
@@ -352,10 +446,13 @@ export default function SubscriptionForm() {
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               disabled={isSubmitting}
-              aria-describedby={fieldErrors.amount ? 'err-amount' : undefined}
+              aria-describedby={`help-amount${fieldErrors.amount ? ' err-amount' : ''}`}
               aria-invalid={!!fieldErrors.amount}
               className={inputCls}
             />
+            <p id="help-amount" className="mt-2 text-xs text-gray-500 leading-relaxed">
+              Must be a positive integer (e.g. 100). Represents the number of token units transferred per interval.
+            </p>
             {fieldErrors.amount && (
               <p id="err-amount" role="alert" className="mt-2 text-xs text-red-400 font-medium">
                 {fieldErrors.amount}
@@ -377,12 +474,12 @@ export default function SubscriptionForm() {
               value={interval}
               onChange={(e) => setInterval(e.target.value)}
               disabled={isSubmitting}
-              aria-describedby={fieldErrors.interval ? 'err-interval' : undefined}
+              aria-describedby={`help-interval${fieldErrors.interval ? ' err-interval' : ''}`}
               aria-invalid={!!fieldErrors.interval}
               className={inputCls}
             />
-            <p className="mt-2 text-xs text-gray-500 leading-relaxed">
-              Default: 2 592 000 s (30 days). Range: 86 400 s – 31 536 000 s.
+            <p id="help-interval" className="mt-2 text-xs text-gray-500 leading-relaxed">
+              Seconds between payments. Min: 86 400 s (1 day), max: 31 536 000 s (1 year). Default: 2 592 000 s (30 days).
             </p>
             {fieldErrors.interval && (
               <p id="err-interval" role="alert" className="mt-2 text-xs text-red-400 font-medium">

@@ -19,6 +19,99 @@ SorobanPay
 2. **Frontend** — Next.js 14 App Router + Freighter wallet integration + Tailwind CSS.
 3. **Build & Deploy** — GNU Makefile + bash deployment script with testnet/mainnet switching.
 
+### System flow
+
+```
++------------------+        +---------------------+        +----------------+
+|   Subscriber     |        |       Merchant      |        | Optional       |
+|  (Freighter)     |<------>|   (Service Owner)   |<------>| Backend/Indexer|
++--------+---------+  Web   +----------+-----------+  API   +--------+-------+
+         |                       Web                         |    ^
+         |                        |                         |    |
+         v                        v                         |    |
++--------+--------+        +--------+--------+               |    |
+|   Frontend       |        | Merchant Portal  |---------------+    |
+|  (Next.js + TS)  |        | or Admin Panel    |                      |
++--------+--------+        +-------------------+                      |
+         |                                                                 |
+         | contract ops                                                    |
+         v                                                                 |
++--------+--------+                                                       |
+| Soroban Contract |------------------------------------------------------+
+| subscribe()       |
+| execute_payment() |
+| cancel()          |
++--------+--------+
+         |
+         v
++--------+--------+
+| Soroban Ledger   |
+| + PersistentStore |
+| + SEP-41 Token    |
++------------------+
+```
+
+**Flow summary:**
+1. **Subscriber** signs transactions via Freighter in the Next.js frontend.
+2. **Frontend** dispatches contract calls (`subscribe`, `cancel`, `execute_payment`) through the Stellar RPC.
+3. **Soroban Contract** executes on-chain, interacting with the **SEP-41 Token** for allowances/transfers and persisting state in the **Soroban Ledger**.
+4. **Structured events** emitted by the contract can be indexed by an **optional backend** for analytics, history, or notification triggers.
+5. **Merchant** may use a dedicated portal or admin panel to trigger `execute_payment` and view subscription state.
+
+---
+
+## Quick Start (testnet demo — ~5 minutes)
+
+Get SorobanPay running on Stellar testnet from a clean machine.
+
+### 1. Install prerequisites
+
+```bash
+# Rust + wasm target
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup target add wasm32-unknown-unknown
+
+# Stellar CLI
+cargo install --locked stellar-cli --features opt
+
+# Node.js ≥ 18  →  https://nodejs.org (or use nvm)
+```
+
+### 2. Clone and build
+
+```bash
+git clone https://github.com/Chrisland58/SorobanPay.git
+cd SorobanPay
+make build
+```
+
+### 3. Deploy to testnet
+
+```bash
+stellar keys generate alice --network testnet
+stellar keys fund alice --network testnet
+CONTRACT_ID=$(bash deploy/deploy.sh)
+echo "Contract: $CONTRACT_ID"
+```
+
+### 4. Configure and start the frontend
+
+```bash
+cd frontend
+cp .env.example .env.local
+# Edit .env.local — paste $CONTRACT_ID into NEXT_PUBLIC_CONTRACT_ID
+npm install
+npm run dev
+```
+
+Open http://localhost:3000 in a browser with the [Freighter extension](https://www.freighter.app) installed and set to **Testnet**.
+
+### 5. Try a subscription
+
+1. In Freighter, switch to Testnet and fund your wallet via [Friendbot](https://laboratory.stellar.org/#account-creator?network=test).
+2. Open the app, enter a merchant address and amount, and click **Subscribe**.
+3. Approve the transaction in Freighter — the subscription is now live on-chain.
+
 ---
 
 ## Prerequisites
@@ -43,11 +136,55 @@ make build
 
 Compiles the Rust contract to `contracts/target/wasm32-unknown-unknown/release/soroban_subscription_contract.wasm` using the `--release` profile (`opt-level = "z"`, `lto = true`).
 
+**Override defaults at the command line:**
+
+```bash
+make build TARGET_TRIPLE=<triple> PROFILE=<debug|release>
+```
+
+Example — cross-compile for a different WASM target:
+
+```bash
+make build TARGET_TRIPLE=wasm32-unknown-unknown PROFILE=release
+```
+
+### Extending the Makefile for new targets
+
+The Makefile exposes two override-friendly variables:
+
+- `TARGET_TRIPLE` — Rust compilation target (default: `wasm32-unknown-unknown`)
+- `PROFILE` — Cargo profile name (default: `release`)
+
+**To add a new compilation target:**
+
+1. Install the Rust target with `rustup target add <triple>`.
+2. Build with `make build TARGET_TRIPLE=<triple>`.
+3. The output artifact lands under `contracts/target/<triple>/<profile>/soroban_subscription_contract.wasm`.
+
+Example — add a native host build target:
+
+```bash
+make build TARGET_TRIPLE=x86_64-unknown-linux-gnu PROFILE=debug
+```
+
+**Caution:** `make test` always runs via the native host (`cargo test` without `--target`). Do not set `TARGET_TRIPLE` for testing; WASM cross-targets cannot execute tests.
+
 ### Test
 
 ```bash
 make test
 ```
+
+Equivalent to:
+
+```bash
+cargo test \
+  --manifest-path contracts/subscription/Cargo.toml
+```
+
+**Prerequisites:**
+- Rust stable toolchain
+- `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`)
 
 Runs the full test suite: unit tests (lifecycle, error paths, auth, events) and property-based tests (time-lock, double-payment prevention, balance invariant, and more).
 
@@ -63,54 +200,112 @@ Removes all build artifacts from `contracts/target/`.
 
 ## Deployment
 
-### Setup identity
-
-```bash
-# Create a Stellar identity (one-time)
-stellar keys generate alice --network testnet
-
-# Fund it on testnet
-stellar keys fund alice --network testnet
-```
-
-### Deploy to testnet (default)
-
-```bash
-bash deploy/deploy.sh
-```
-
-The contract address is printed to stdout on success. All diagnostic output goes to stderr.
-
-### Deploy to mainnet
-
-```bash
-STELLAR_NETWORK=mainnet STELLAR_IDENTITY=your-identity bash deploy/deploy.sh
-```
-
-### Environment variables for deploy.sh
+### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `STELLAR_NETWORK` | `testnet` | `testnet` or `mainnet` |
-| `STELLAR_IDENTITY` | `alice` | Stellar CLI identity alias |
+| `STELLAR_NETWORK` | `testnet` | Target network: `testnet` or `mainnet` |
+| `STELLAR_IDENTITY` | `alice` | Stellar CLI identity alias to sign and pay fees |
+
+### Deploy to testnet
+
+```bash
+# 1. Create identity (one-time)
+stellar keys generate alice --network testnet
+
+# 2. Fund via Friendbot (testnet only — free)
+stellar keys fund alice --network testnet
+
+# 3. Deploy
+bash deploy/deploy.sh
+```
+
+The contract address is printed to stdout. All diagnostic output goes to stderr. Save the address — you will need it for the frontend `.env.local`.
+
+### Deploy to mainnet
+
+Mainnet requires a **real funded account**. There is no Friendbot.
+
+```bash
+# 1. Generate a mainnet identity (one-time)
+stellar keys generate my-mainnet-id --network mainnet
+
+# 2. Print the public key and fund it with real XLM (minimum ~2 XLM for base reserve + fee)
+stellar keys address my-mainnet-id
+
+# 3. Deploy
+STELLAR_NETWORK=mainnet STELLAR_IDENTITY=my-mainnet-id bash deploy/deploy.sh
+```
+
+On success the contract address is printed to stdout, e.g.:
+
+```
+CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+```
+
+Capture it directly if needed:
+
+```bash
+CONTRACT_ID=$(STELLAR_NETWORK=mainnet STELLAR_IDENTITY=my-mainnet-id bash deploy/deploy.sh)
+echo "Deployed: $CONTRACT_ID"
+```
+
+### Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---------|-------------|-----|
+| `ERROR: Contract build failed` | Rust toolchain or `wasm32` target missing | Run `rustup target add wasm32-unknown-unknown` |
+| `ERROR: WASM artifact not found` | Build produced no output | Check `make build` output; ensure `opt-level = "z"` is set in `Cargo.toml` |
+| `ERROR: Contract deployment failed` | Identity not funded or CLI not configured | Fund the account; verify with `stellar keys address <identity>` |
+| `ERROR: Unknown STELLAR_NETWORK value` | Typo in `STELLAR_NETWORK` | Allowed values are exactly `testnet` or `mainnet` |
+| Empty contract ID returned | RPC node unreachable or rate-limited | Retry; check RPC URL connectivity |
+| Transaction fee too low (mainnet) | Surge pricing during congestion | Re-run; the script uses the Stellar CLI default fee which self-adjusts |
 
 ---
 
 ## Frontend
 
-### Environment variables
+### 1. Install Freighter
 
-Create `frontend/.env.local` (copy from `frontend/.env.example`):
+Freighter is the Stellar browser wallet the app uses for signing transactions.
 
-```env
-NEXT_PUBLIC_CONTRACT_ID=CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-NEXT_PUBLIC_RPC_URL=https://soroban-testnet.stellar.org
-NEXT_PUBLIC_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
+1. Install the extension for [Chrome / Brave](https://chrome.google.com/webstore/detail/freighter/bcacfldlkkdogcmkkibnjlakofdplcbk) or [Firefox](https://addons.mozilla.org/en-US/firefox/addon/freighter/).
+2. Open Freighter and create or import a wallet.
+3. Click the network selector in the top-right and choose **Testnet** (for local development) or **Mainnet** (for production).
+4. Fund your testnet wallet via [Stellar Friendbot](https://laboratory.stellar.org/#account-creator?network=test).
+
+> **Mainnet note:** Freighter defaults to Mainnet. Make sure the network in Freighter matches `NEXT_PUBLIC_NETWORK_PASSPHRASE` in your `.env.local`, or transactions will be rejected.
+
+### 2. Configure environment variables
+
+Copy the example env file:
+
+```bash
+cp frontend/.env.example frontend/.env.local
 ```
 
-Replace `NEXT_PUBLIC_CONTRACT_ID` with the address output by `deploy.sh`.
+Edit `frontend/.env.local`:
 
-### Install and run
+```env
+# Contract address output by deploy.sh
+NEXT_PUBLIC_CONTRACT_ID=CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+# Testnet
+NEXT_PUBLIC_RPC_URL=https://soroban-testnet.stellar.org
+NEXT_PUBLIC_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
+
+# Mainnet (swap these two lines when deploying to mainnet)
+# NEXT_PUBLIC_RPC_URL=https://mainnet.stellar.validationcloud.io/v1/<YOUR_KEY>
+# NEXT_PUBLIC_NETWORK_PASSPHRASE=Public Global Stellar Network ; September 2015
+```
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `NEXT_PUBLIC_CONTRACT_ID` | ✅ | Deployed contract address (`C…`) from `deploy.sh` |
+| `NEXT_PUBLIC_RPC_URL` | ✅ | Soroban RPC endpoint |
+| `NEXT_PUBLIC_NETWORK_PASSPHRASE` | ✅ | Must match the network Freighter is set to |
+
+### 3. Install dependencies and run
 
 ```bash
 cd frontend
@@ -118,7 +313,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000 in a browser with Freighter installed.
+Open http://localhost:3000. Freighter will prompt for connection on the first interaction.
 
 ### Build for production
 
@@ -135,7 +330,17 @@ cd frontend
 npm run type-check
 ```
 
+### Troubleshooting Freighter
+
+| Symptom | Fix |
+|---------|-----|
+| "Wallet not connected" | Click the Freighter icon and approve the site connection |
+| Transaction rejected — wrong network | Match the Freighter network with `NEXT_PUBLIC_NETWORK_PASSPHRASE` |
+| "Insufficient balance" | Fund the account (Friendbot on testnet; real XLM on mainnet) |
+| Freighter not detected | Ensure the extension is installed and the page is served over `http://localhost` or `https://` |
+
 ---
+
 
 ## Contract entry points
 
@@ -151,6 +356,24 @@ npm run type-check
 |-------|--------|------|
 | `subscribe` | `(symbol("subscribe"), subscriber, merchant)` | `amount: i128` |
 | `executed` | `(symbol("executed"), subscriber, merchant)` | `amount: i128` |
+
+Events use three topics: a `Symbol` discriminant followed by two `Address` values. The data field is an `i128` amount in stroops.
+
+**Quick decode example (TypeScript):**
+
+```typescript
+import { xdr, scValToNative } from "@stellar/stellar-sdk";
+
+function decodeEvent(topic: string[], value: string) {
+  const [type, subscriber, merchant] = topic.map((t) =>
+    scValToNative(xdr.ScVal.fromXDR(t, "base64"))
+  );
+  const amount = BigInt(scValToNative(xdr.ScVal.fromXDR(value, "base64")));
+  return { type, subscriber, merchant, amount };
+}
+```
+
+See [docs/events.md](docs/events.md) for the full event reference, RPC query examples, and Python decoding code.
 
 ---
 

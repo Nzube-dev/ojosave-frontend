@@ -60,6 +60,60 @@ SorobanPay
 
 ---
 
+## Quick Start (testnet demo — ~5 minutes)
+
+Get SorobanPay running on Stellar testnet from a clean machine.
+
+### 1. Install prerequisites
+
+```bash
+# Rust + wasm target
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup target add wasm32-unknown-unknown
+
+# Stellar CLI
+cargo install --locked stellar-cli --features opt
+
+# Node.js ≥ 18  →  https://nodejs.org (or use nvm)
+```
+
+### 2. Clone and build
+
+```bash
+git clone https://github.com/Chrisland58/SorobanPay.git
+cd SorobanPay
+make build
+```
+
+### 3. Deploy to testnet
+
+```bash
+stellar keys generate alice --network testnet
+stellar keys fund alice --network testnet
+CONTRACT_ID=$(bash deploy/deploy.sh)
+echo "Contract: $CONTRACT_ID"
+```
+
+### 4. Configure and start the frontend
+
+```bash
+cd frontend
+cp .env.example .env.local
+# Edit .env.local — paste $CONTRACT_ID into NEXT_PUBLIC_CONTRACT_ID
+npm install
+npm run dev
+```
+
+Open http://localhost:3000 in a browser with the [Freighter extension](https://www.freighter.app) installed and set to **Testnet**.
+
+### 5. Try a subscription
+
+1. In Freighter, switch to Testnet and fund your wallet via [Friendbot](https://laboratory.stellar.org/#account-creator?network=test).
+2. Open the app, enter a merchant address and amount, and click **Subscribe**.
+3. Approve the transaction in Freighter — the subscription is now live on-chain.
+
+---
+
 ## Prerequisites
 
 | Tool | Version | Install |

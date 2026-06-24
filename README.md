@@ -177,6 +177,76 @@ npm run type-check
 
 ---
 
+## Contributing
+
+We welcome contributions! Whether you want to report a bug, suggest an enhancement, or submit code changes, here's how to get started.
+
+### Filing Issues
+
+**Bug Reports** — If you've found a problem:
+1. Check existing issues to avoid duplicates
+2. Use the **bug** label
+3. Provide:
+   - Clear description of the issue
+   - Steps to reproduce (if applicable)
+   - Expected vs. actual behavior
+   - Environment details (OS, Node.js version, Rust version)
+   - Error messages or logs
+
+**Feature Requests** — To suggest improvements:
+1. Use the **enhancement** label
+2. Describe the use case and expected behavior
+3. Include any relevant examples or references
+
+### Making Changes
+
+**Setting up locally:**
+
+```bash
+# Clone the repository
+git clone https://github.com/Chrisland58/SorobanPay.git
+cd SorobanPay
+
+# Install prerequisites (see Prerequisites section above)
+
+# Build and test
+make build
+make test
+
+# Frontend setup
+cd frontend
+npm install
+npm run dev
+```
+
+**Submitting code:**
+1. Create a feature branch: `git checkout -b fix/issue-number` or `git checkout -b feature/description`
+2. Write tests for new functionality
+3. Ensure all tests pass: `make test` (contract) and `npm run type-check` (frontend)
+4. Run linters: `next lint` (frontend)
+5. Commit with clear, descriptive messages
+6. Push your branch and open a pull request
+
+**PR guidelines:**
+- Link the related issue (e.g., "Closes #189")
+- Describe what changed and why
+- Include any breaking changes
+- Ensure CI/CD checks pass
+
+### Labels
+
+| Label | Purpose |
+|-------|---------|
+| `bug` | Something isn't working |
+| `enhancement` | New feature or improvement |
+| `documentation` | Updates to docs or comments |
+| `test` | Test coverage or test improvements |
+| `contract` | Changes to the Soroban smart contract |
+| `frontend` | Changes to the Next.js frontend |
+| `deployment` | Changes to build or deploy scripts |
+
+---
+
 ## License
 
 MIT

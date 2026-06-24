@@ -144,8 +144,9 @@ impl SubscriptionProtocol {
     /// - `ContractError::NoActiveSubscription` — if no subscription exists for the pair.
     ///
     /// # Notes
-    /// No event is emitted on cancellation (per Requirement 7.5).
-    /// Off-chain indexers detect cancellation by the absence of future `executed` events.
+    /// Emits a `cancel` event after successful removal to signal off-chain services
+    /// that the subscription has ended. This provides a reliable and explicit signal
+    /// for event indexing, rather than relying on the absence of future payments.
     pub fn cancel(
         env: Env,
         subscriber: Address,
@@ -162,6 +163,9 @@ impl SubscriptionProtocol {
 
         // 3. Remove subscription from persistent storage.
         env.storage().persistent().remove(&key);
+
+        // 4. Emit event — after successful removal to signal off-chain services.
+        events::emit_cancel(&env, &subscriber, &merchant);
 
         Ok(())
     }

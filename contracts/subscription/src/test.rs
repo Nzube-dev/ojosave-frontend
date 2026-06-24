@@ -294,13 +294,13 @@ fn test_no_events_on_payment_not_due() {
 }
 
 #[test]
-fn test_cancel_emits_no_event() {
+fn test_cancel_emits_event() {
     let t = T::new();
     t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &86_400_u64);
     let n = t.env.events().all().iter().filter(|e| e.0 == t.contract_id).count();
     t.client.cancel(&t.subscriber, &t.merchant);
     let n2 = t.env.events().all().iter().filter(|e| e.0 == t.contract_id).count();
-    assert_eq!(n, n2, "cancel must not emit any events");
+    assert_eq!(n2, n + 1, "cancel should emit exactly 1 event");
 }
 
 // ─── Property-Based Tests ─────────────────────────────────────────────────────

@@ -30,3 +30,18 @@ pub fn emit_executed(env: &Env, subscriber: &Address, merchant: &Address, amount
         amount,
     );
 }
+
+/// Emit the `cancel` event after a subscription has been successfully cancelled and removed.
+///
+/// Topics:  (symbol("cancel"), subscriber, merchant)
+/// Data:    empty (unit type ())
+pub fn emit_cancel(env: &Env, subscriber: &Address, merchant: &Address) {
+    env.events().publish(
+        (
+            Symbol::new(env, "cancel"),
+            subscriber.clone(),
+            merchant.clone(),
+        ),
+        (),
+    );
+}

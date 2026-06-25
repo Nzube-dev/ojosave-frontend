@@ -579,6 +579,8 @@ For detailed guidance on event sources, storage options, indexing patterns, work
 - **Time-lock**: Payment cannot be collected before `next_payment` — enforced on-chain by the Soroban ledger timestamp.
 - **TTL**: Subscriptions have a ~30-day minimum and ~365-day maximum TTL. Each successful payment resets the 365-day clock.
 
+For guidance on storing backend secrets safely (database credentials, RPC API keys, webhook secrets), see [docs/security.md](docs/security.md).
+
 ---
 
 ## Contributing

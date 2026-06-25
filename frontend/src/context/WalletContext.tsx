@@ -14,6 +14,7 @@ import React, {
   createContext,
   useCallback,
   useState,
+  useEffect,
   type ReactNode,
 } from 'react';
 import { connectWallet, detectFreighter } from '@/lib/wallet_manager';
@@ -29,6 +30,8 @@ export interface WalletContextValue {
   connectError: string | null;
   /** True when Freighter extension is detected in the browser. */
   freighterInstalled: boolean;
+  /** True when a previously-connected session has become invalid (Freighter unavailable). */
+  sessionInvalid: boolean;
   /** Trigger wallet connection — opens Freighter permission dialog. */
   connect: () => Promise<void>;
   /** Clear publicKey and return to disconnected state. */
@@ -46,10 +49,26 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [freighterInstalled, setFreighterInstalled] = useState(true);
+  const [sessionInvalid, setSessionInvalid] = useState(false);
+
+  // Poll for Freighter availability every 10 s when a session is active.
+  // If Freighter disappears, mark session invalid so the UI can show a fallback.
+  useEffect(() => {
+    if (!publicKey) {
+      setSessionInvalid(false);
+      return;
+    }
+    const id = setInterval(async () => {
+      const ok = await detectFreighter();
+      if (!ok) setSessionInvalid(true);
+    }, 10_000);
+    return () => clearInterval(id);
+  }, [publicKey]);
 
   const connect = useCallback(async () => {
     setIsConnecting(true);
     setConnectError(null);
+    setSessionInvalid(false);
 
     try {
       // Check installation first so we can show the install link (Req 9.1)
@@ -79,6 +98,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const disconnect = useCallback(() => {
     setPublicKey(null);     // Clears stored key (Req 9.6)
     setConnectError(null);
+    setSessionInvalid(false);
   }, []);
 
   return (
@@ -88,6 +108,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         isConnecting,
         connectError,
         freighterInstalled,
+        sessionInvalid,
         connect,
         disconnect,
       }}

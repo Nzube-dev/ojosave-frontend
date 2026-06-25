@@ -5,6 +5,9 @@ import cron from 'node-cron';
 import { EventIndexer } from './services/eventIndexer';
 import { PayoutSummaryGenerator } from './services/payoutSummaryGenerator';
 import summariesRouter from './routes/summaries';
+import subscriptionsRouter from './routes/subscriptions';
+import auditLogsRouter from './routes/auditLogs';
+import { apiLimiter } from './middleware/rateLimiter';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -12,9 +15,12 @@ const PORT = process.env.PORT || 3001;
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(apiLimiter);
 
 // Routes
 app.use('/api/summaries', summariesRouter);
+app.use('/api/subscriptions', subscriptionsRouter);
+app.use('/api/audit-logs', auditLogsRouter);
 
 // Initialize services
 const rpcUrl = process.env.RPC_URL || 'https://soroban-testnet.stellar.org';

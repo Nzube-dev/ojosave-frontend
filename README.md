@@ -335,15 +335,84 @@ npm run type-check
 
 ### Troubleshooting Freighter
 
+#### Connection errors
+
+**Symptom:** "Wallet not connected" badge appears and the Submit button is disabled.
+
+Steps to resolve:
+1. Click the Freighter extension icon in your browser toolbar.
+2. If the site is not listed under "Connected Sites", click **Connect** and approve the connection prompt.
+3. Reload the page — the badge should turn green.
+
+**Symptom:** Freighter popup does not appear when the page loads.
+
+Steps to resolve:
+1. Confirm the Freighter extension is installed (Chrome/Brave or Firefox — see [Install Freighter](#1-install-freighter)).
+2. Make sure the page is served over `http://localhost` or `https://`. Freighter blocks requests from `file://` origins.
+3. Disable other wallet extensions temporarily — they can conflict with the Freighter injected API.
+4. Try a hard reload (`Ctrl+Shift+R` / `Cmd+Shift+R`).
+
+#### Signing / permission failures
+
+**Symptom:** Transaction rejected — "User declined" or signing popup dismissed.
+
+Steps to resolve:
+1. Open Freighter and confirm the correct account is selected.
+2. Re-submit the form; Freighter will show the signing prompt again.
+3. If Freighter closes before you can sign, disable browser pop-up blockers for `localhost`.
+
+**Symptom:** Transaction rejected — wrong network.
+
+Steps to resolve:
+1. Open Freighter → click the network name at the top-right.
+2. Select the network that matches `NEXT_PUBLIC_NETWORK_PASSPHRASE` in your `.env.local`:
+   - Testnet passphrase: `Test SDF Network ; September 2015`
+   - Mainnet passphrase: `Public Global Stellar Network ; September 2015`
+3. Reload and retry.
+
+**Symptom:** "Insufficient balance" error.
+
+Steps to resolve:
+- **Testnet:** fund your wallet at [Stellar Friendbot](https://laboratory.stellar.org/#account-creator?network=test).
+- **Mainnet:** transfer at least 2 XLM to your account to cover the base reserve and transaction fee.
+
+#### Quick-reference table
+
 | Symptom | Fix |
 |---------|-----|
-| "Wallet not connected" | Click the Freighter icon and approve the site connection |
-| Transaction rejected — wrong network | Match the Freighter network with `NEXT_PUBLIC_NETWORK_PASSPHRASE` |
-| "Insufficient balance" | Fund the account (Friendbot on testnet; real XLM on mainnet) |
-| Freighter not detected | Ensure the extension is installed and the page is served over `http://localhost` or `https://` |
+| "Wallet not connected" badge | Open Freighter and approve the site connection |
+| Signing popup never appears | Serve the app over `http://localhost` or `https://`; disable conflicting extensions |
+| Transaction rejected — wrong network | Match Freighter's network selector to `NEXT_PUBLIC_NETWORK_PASSPHRASE` |
+| "Insufficient balance" | Fund via Friendbot (testnet) or send XLM (mainnet) |
+| Freighter not detected | Install the extension; page must be on `http://localhost` or `https://` |
+| Popup closes before signing | Disable pop-up blockers for `localhost` |
 
 ---
 
+## Wallet connection UX states
+
+The `SubscriptionForm` component reflects the wallet and transaction lifecycle through distinct visual states. Contributors should maintain these states when modifying the form.
+
+| State | Trigger | UI indicator | Submit button |
+|-------|---------|-------------|---------------|
+| **Disconnected** | `publicKey` is `null` (Freighter not connected or not approved) | Gray badge: "Disconnected" with dim dot | Disabled; yellow hint: "Connect your Freighter wallet to enable submission." |
+| **Connected / idle** | `publicKey` is set, `isSubmitting` is `false` | Green badge: "Connected" with green dot | Enabled: "Authorize Subscription" |
+| **Awaiting signature** | `isSubmitting` is `true` (transaction sent to Freighter, waiting for user approval) | Blue animated spinner + progress bar with label "Submitting transaction…" | Disabled: "Submitting…" with spinner |
+| **Success** | `successData` is set after transaction confirmed | Green `SuccessCard` with tx hash, summary, and next-steps guidance | Hidden; replaced by "Create another subscription" button |
+| **Error** | `txError` is set after a failed or rejected transaction | Red alert box with error message and "Your form data has been preserved — review and retry." | Re-enabled; form data retained for correction |
+
+### State transition diagram
+
+```
+Disconnected ──(connect Freighter)──► Connected/idle
+Connected/idle ──(submit form)──► Awaiting signature
+Awaiting signature ──(user approves)──► Success
+Awaiting signature ──(user rejects / timeout / RPC error)──► Error
+Error ──(fix form & resubmit)──► Awaiting signature
+Success ──(click "Create another")──► Connected/idle
+```
+
+---
 
 ## Contract entry points
 
@@ -352,6 +421,74 @@ npm run type-check
 | `subscribe(subscriber, merchant, token, amount, interval)` | subscriber | Create or update subscription. Amount must be > 0, interval in [86400, 31536000] seconds. |
 | `execute_payment(subscriber, merchant)` | merchant | Collect payment if interval has elapsed. Transfers tokens directly subscriber → merchant. |
 | `cancel(subscriber, merchant)` | subscriber | Remove subscription from persistent storage. |
+
+### Examples
+
+**subscribe** — authorize 100 tokens every 30 days:
+
+```bash
+stellar contract invoke \
+  --id $CONTRACT_ID --source alice --network testnet \
+  -- subscribe \
+  --subscriber GABC...ALICE \
+  --merchant   GXYZ...MERCHANT \
+  --token      CABC...USDC \
+  --amount     100 \
+  --interval   2592000
+```
+
+```typescript
+import { Contract, nativeToScVal, Address } from "@stellar/stellar-sdk";
+const op = contract.call(
+  "subscribe",
+  new Address(subscriber).toScVal(),
+  new Address(merchant).toScVal(),
+  new Address(tokenAddress).toScVal(),
+  nativeToScVal(100n, { type: "i128" }),
+  nativeToScVal(2592000n, { type: "u64" }),
+);
+// Expected: subscription stored, `subscribe` event emitted, first payment collectable immediately.
+```
+
+**execute_payment** — merchant collects a due payment:
+
+```bash
+stellar contract invoke \
+  --id $CONTRACT_ID --source merchant-key --network testnet \
+  -- execute_payment \
+  --subscriber GABC...ALICE \
+  --merchant   GXYZ...MERCHANT
+```
+
+```typescript
+const op = contract.call(
+  "execute_payment",
+  new Address(subscriber).toScVal(),
+  new Address(merchant).toScVal(),
+);
+// Expected: 100 tokens transferred subscriber → merchant, `executed` event emitted, next_payment advanced.
+```
+
+**cancel** — subscriber terminates the agreement:
+
+```bash
+stellar contract invoke \
+  --id $CONTRACT_ID --source alice --network testnet \
+  -- cancel \
+  --subscriber GABC...ALICE \
+  --merchant   GXYZ...MERCHANT
+```
+
+```typescript
+const op = contract.call(
+  "cancel",
+  new Address(subscriber).toScVal(),
+  new Address(merchant).toScVal(),
+);
+// Expected: subscription removed; future execute_payment calls return NoActiveSubscription (error 4).
+```
+
+For the full parameter reference and error cases see [docs/contract-api.md](docs/contract-api.md).
 
 ### Events emitted
 
@@ -441,6 +578,8 @@ For detailed guidance on event sources, storage options, indexing patterns, work
 - **Allowance model**: Subscribers grant a SEP-41 allowance to the contract. Revoking allowance via `token.approve(contract_id, 0)` prevents future payments regardless of on-chain subscription state.
 - **Time-lock**: Payment cannot be collected before `next_payment` — enforced on-chain by the Soroban ledger timestamp.
 - **TTL**: Subscriptions have a ~30-day minimum and ~365-day maximum TTL. Each successful payment resets the 365-day clock.
+
+For guidance on storing backend secrets safely (database credentials, RPC API keys, webhook secrets), see [docs/security.md](docs/security.md).
 
 ---
 

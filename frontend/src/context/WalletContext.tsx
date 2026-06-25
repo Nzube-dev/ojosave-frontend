@@ -77,6 +77,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const connect = useCallback(async () => {
     setIsConnecting(true);
     setConnectError(null);
+    setSessionInvalid(false);
 
     try {
       // Check installation first so we can show the install link (Req 9.1)
@@ -107,6 +108,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const disconnect = useCallback(() => {
     setPublicKey(null); // Clears stored key (Req 9.6)
     setConnectError(null);
+    setSessionInvalid(false);
   }, []);
 
   return (

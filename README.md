@@ -11,6 +11,7 @@ SorobanPay
 ├── contracts/subscription/   Rust/Soroban smart contract
 ├── deploy/deploy.sh          Automated testnet/mainnet deployment
 ├── frontend/                 Next.js 14 TypeScript frontend
+├── backend/audit-trail/      Backend cancellation audit trail design
 └── Makefile                  Build, test, and clean targets
 ```
 
@@ -56,7 +57,8 @@ SorobanPay
 2. **Frontend** dispatches contract calls (`subscribe`, `cancel`, `execute_payment`) through the Stellar RPC.
 3. **Soroban Contract** executes on-chain, interacting with the **SEP-41 Token** for allowances/transfers and persisting state in the **Soroban Ledger**.
 4. **Structured events** emitted by the contract can be indexed by an **optional backend** for analytics, history, or notification triggers.
-5. **Merchant** may use a dedicated portal or admin panel to trigger `execute_payment` and view subscription state.
+5. **Cancellation audit records** are persisted off-chain by backend services after confirmed `cancel` transactions because the contract does not emit cancellation events.
+6. **Merchant** may use a dedicated portal or admin panel to trigger `execute_payment` and view subscription state.
 
 ---
 

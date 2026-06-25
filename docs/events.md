@@ -2,6 +2,8 @@
 
 The `SubscriptionProtocol` contract emits two structured events that off-chain consumers can use for indexing, analytics, and notifications.
 
+Cancellation is intentionally not emitted by the contract. Backend services that need a durable cancellation history should persist confirmed `cancel(subscriber, merchant)` transactions in the off-chain audit trail described in [backend/audit-trail/README.md](../backend/audit-trail/README.md).
+
 ---
 
 ## Event schemas

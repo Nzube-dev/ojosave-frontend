@@ -14,7 +14,7 @@
  *  - Contract config error card with remediation steps
  */
 
-import { useState, useEffect, type FormEvent } from 'react';
+import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { useWallet } from '@/hooks/useWallet';
 import { buildAndSubmitSubscribe } from '@/lib/transaction_builder';
 import {
@@ -41,6 +41,49 @@ const inputCls =
   'text-white placeholder-gray-500 ' +
   'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900 ' +
   'disabled:opacity-50 min-h-[48px] transition-all duration-150';
+
+// ─── Copy button ──────────────────────────────────────────────────────────────
+
+function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [text]);
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      aria-label={copied ? 'Copied!' : `${label} to clipboard`}
+      title={copied ? 'Copied!' : `${label} to clipboard`}
+      className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium
+                 bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-gray-300
+                 hover:text-white transition-colors duration-150 shrink-0
+                 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+    >
+      {copied ? (
+        <>
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 text-green-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+          </svg>
+          <span className="text-green-400">Copied!</span>
+        </>
+      ) : (
+        <>
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" />
+            <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" />
+          </svg>
+          {label}
+        </>
+      )}
+    </button>
+  );
+}
 
 // ─── Network + contract status badge ──────────────────────────────────────────
 
@@ -117,9 +160,12 @@ function ContractConfigError() {
             <li className="leading-relaxed">
               Copy the printed address into{' '}
               <code className="bg-gray-800 px-2 py-1 rounded text-yellow-300 text-xs font-mono">frontend/.env.local</code>:
-              <pre className="mt-2 bg-gray-800 rounded-lg p-3 text-xs overflow-x-auto border border-gray-700">
-                <code>NEXT_PUBLIC_CONTRACT_ID=C…your_address…</code>
-              </pre>
+              <div className="mt-2 flex items-center gap-2">
+                <pre className="flex-1 bg-gray-800 rounded-lg p-3 text-xs overflow-x-auto border border-gray-700">
+                  <code>NEXT_PUBLIC_CONTRACT_ID=C…your_address…</code>
+                </pre>
+                <CopyButton text="NEXT_PUBLIC_CONTRACT_ID=C…your_address…" label="Copy" />
+              </div>
             </li>
             <li className="leading-relaxed">
               Restart the dev server:
@@ -220,10 +266,10 @@ function SuccessCard({
       <button
         onClick={onReset}
         className="w-full rounded-lg border-2 border-green-600/70 text-green-300 hover:bg-green-900/40 active:bg-green-900/60
-                   py-3 sm:py-4 text-sm font-semibold transition-all duration-150 min-h-[48px] hover:shadow-lg
+                   py-3 text-sm font-semibold transition-all duration-150 min-h-[48px] hover:shadow-lg
                    focus:outline-none focus-visible:ring-2 focus-visible:ring-green-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900"
       >
-        Create another subscription
+        Create Another Subscription
       </button>
     </div>
   );
@@ -275,18 +321,164 @@ function ConfirmModal({
         <div className="flex gap-3 pt-1">
           <button
             onClick={onCancel}
-            className="flex-1 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-800 py-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500"
+            className="flex-1 rounded-lg border border-gray-600 bg-gray-800/50 text-gray-300 hover:bg-gray-700 active:bg-gray-800 py-3 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
           >
-            Go back
+            Go Back
           </button>
           <button
             onClick={onConfirm}
-            className="flex-1 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 py-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400"
+            className="flex-1 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 py-3 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
-            Confirm & authorize
+            Confirm & Authorize
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Transaction error classifier + card ──────────────────────────────────────
+
+interface TxErrorInfo {
+  title: string;
+  summary: string;
+  fix: string;
+  raw: string;
+}
+
+function classifyError(err: unknown): TxErrorInfo {
+  const raw = err instanceof Error ? err.message : String(err);
+  const msg = raw.toLowerCase();
+
+  if (msg.includes('user declined') || msg.includes('rejected') || msg.includes('signing failed') || msg.includes('user rejected')) {
+    return {
+      title:   'Signing cancelled',
+      summary: 'You declined the transaction in Freighter.',
+      fix:     'Click "Authorize Subscription" again and approve the request in the Freighter pop-up.',
+      raw,
+    };
+  }
+  if (msg.includes('insufficient balance') || msg.includes('not enough') || msg.includes('underfunded')) {
+    return {
+      title:   'Insufficient balance',
+      summary: 'Your wallet does not have enough tokens or XLM to cover this transaction.',
+      fix:     'Top up your account. On testnet use Stellar Friendbot; on mainnet send XLM to your address.',
+      raw,
+    };
+  }
+  if (msg.includes('allowance') || msg.includes('transfer from') || msg.includes('spend limit')) {
+    return {
+      title:   'Token allowance too low',
+      summary: 'The contract is not authorized to transfer this token amount on your behalf.',
+      fix:     'Approve a higher token allowance by calling token.approve(contract_id, amount) before subscribing.',
+      raw,
+    };
+  }
+  if (msg.includes('timeout') || msg.includes('timed out')) {
+    return {
+      title:   'Transaction timed out',
+      summary: 'The network did not confirm the transaction within the expected time.',
+      fix:     'Check your connection and retry. The transaction may still confirm — wait a minute before resubmitting.',
+      raw,
+    };
+  }
+  if (msg.includes('network') || msg.includes('fetch') || msg.includes('rpc') || msg.includes('failed to fetch')) {
+    return {
+      title:   'Network error',
+      summary: 'Could not reach the Soroban RPC endpoint.',
+      fix:     'Check your internet connection and verify NEXT_PUBLIC_RPC_URL in .env.local. Retry in a moment.',
+      raw,
+    };
+  }
+  if (msg.includes('wrong network') || msg.includes('passphrase') || msg.includes('network mismatch')) {
+    return {
+      title:   'Wrong network',
+      summary: 'Freighter is set to a different network than the app expects.',
+      fix:     `Open Freighter, switch to ${NETWORK_NAME}, and try again.`,
+      raw,
+    };
+  }
+  if (msg.includes('amountmustbepositive') || msg.includes('error(contract, #1)')) {
+    return {
+      title:   'Invalid amount',
+      summary: 'The contract rejected the amount — it must be greater than zero.',
+      fix:     'Enter a positive integer amount and resubmit.',
+      raw,
+    };
+  }
+  if (msg.includes('intervaltoo') || msg.includes('error(contract, #2)') || msg.includes('error(contract, #3)')) {
+    return {
+      title:   'Invalid interval',
+      summary: 'The payment interval is outside the allowed range (1 day – 1 year).',
+      fix:     'Enter a value between 86 400 s (1 day) and 31 536 000 s (1 year).',
+      raw,
+    };
+  }
+  if (msg.includes('unauthorized') || msg.includes('error(contract, #6)')) {
+    return {
+      title:   'Authorisation failed',
+      summary: 'The contract rejected the transaction signature.',
+      fix:     'Ensure the connected wallet matches the subscriber address and retry.',
+      raw,
+    };
+  }
+
+  return {
+    title:   'Transaction failed',
+    summary: 'An unexpected error occurred while submitting the transaction.',
+    fix:     'Review the technical details below and retry. If the problem persists, check the README troubleshooting section.',
+    raw,
+  };
+}
+
+function ErrorCard({ error, onDismiss }: { error: TxErrorInfo; onDismiss: () => void }) {
+  const [showDetails, setShowDetails] = useState(false);
+
+  return (
+    <div
+      role="alert"
+      className="mb-6 rounded-xl bg-red-900/40 border border-red-600/70 p-4 sm:p-5 text-sm shadow-md"
+    >
+      <div className="flex items-start gap-3 mb-3">
+        <span className="text-xl flex-shrink-0 mt-0.5" aria-hidden="true">⚠</span>
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-red-300 text-base leading-snug">{error.title}</p>
+          <p className="mt-1 text-gray-300 leading-relaxed">{error.summary}</p>
+        </div>
+        <button
+          onClick={onDismiss}
+          aria-label="Dismiss error"
+          className="shrink-0 text-gray-500 hover:text-gray-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 rounded"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Suggested fix */}
+      <div className="flex items-start gap-2 bg-gray-800/60 rounded-lg px-3 py-2.5 mb-3">
+        <span className="text-blue-400 shrink-0 mt-0.5" aria-hidden="true">→</span>
+        <p className="text-gray-200 text-xs leading-relaxed">{error.fix}</p>
+      </div>
+
+      {/* Collapsible technical details */}
+      <button
+        type="button"
+        onClick={() => setShowDetails(v => !v)}
+        aria-expanded={showDetails}
+        className="text-xs text-gray-500 hover:text-gray-300 transition-colors underline underline-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 rounded"
+      >
+        {showDetails ? 'Hide' : 'Show'} technical details
+      </button>
+      {showDetails && (
+        <div className="mt-2 flex items-start gap-2 bg-gray-900/70 rounded-lg p-3 border border-gray-700">
+          <pre className="flex-1 text-xs text-gray-400 font-mono whitespace-pre-wrap break-all leading-relaxed overflow-x-auto">
+            {error.raw}
+          </pre>
+          <CopyButton text={error.raw} label="Copy" />
+        </div>
+      )}
     </div>
   );
 }
@@ -306,7 +498,7 @@ export default function SubscriptionForm() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors]   = useState<FieldErrors>({});
-  const [txError, setTxError]           = useState<string | null>(null);
+  const [txError, setTxError]           = useState<TxErrorInfo | null>(null);
   const [successData, setSuccessData]   = useState<SuccessData | null>(null);
   const [showConfirm, setShowConfirm]   = useState(false);
 
@@ -362,14 +554,7 @@ export default function SubscriptionForm() {
         interval,
       });
     } catch (err) {
-      const raw = err instanceof Error ? err.message : String(err);
-      if (raw.toLowerCase().includes('signing failed') || raw.toLowerCase().includes('rejected')) {
-        setTxError('Transaction rejected: you declined the signing request in Freighter.');
-      } else if (raw.toLowerCase().includes('timeout')) {
-        setTxError('Transaction timed out waiting for confirmation. Please try again.');
-      } else {
-        setTxError(`Transaction failed: ${raw}`);
-      }
+      setTxError(classifyError(err));
     } finally {
       setIsSubmitting(false);
     }
@@ -401,9 +586,18 @@ export default function SubscriptionForm() {
           {publicKey ? 'Connected' : 'Disconnected'}
         </span>
       </div>
-      <p className="text-gray-400 text-sm mb-8 leading-relaxed">
+      <p className="text-gray-400 text-sm mb-5 leading-relaxed">
         Authorize a recurring on-chain payment using your Freighter wallet.
       </p>
+
+      {/* Contract ID with copy button */}
+      <div className="flex items-center gap-2 mb-8 bg-gray-800/50 border border-gray-700/60 rounded-lg px-3 py-2">
+        <span className="text-xs text-gray-500 font-medium shrink-0">Contract</span>
+        <code className="flex-1 text-xs text-gray-300 font-mono truncate" title={CONTRACT_ID}>
+          {CONTRACT_ID}
+        </code>
+        <CopyButton text={CONTRACT_ID} label="Copy" />
+      </div>
 
       {/* Progress indicator — visible only while submitting */}
       {isSubmitting && <ProgressBar />}
@@ -412,18 +606,7 @@ export default function SubscriptionForm() {
       {successData && <SuccessCard data={successData} onReset={resetForm} />}
 
       {/* Transaction error */}
-      {txError && (
-        <div
-          role="alert"
-          className="mb-6 rounded-lg bg-red-900/60 border border-red-600 p-4 sm:p-5 text-sm text-red-200"
-        >
-          <p className="font-semibold mb-2 text-base">Transaction error</p>
-          <p className="leading-relaxed">{txError}</p>
-          <p className="mt-3 text-gray-400 text-xs">
-            Your form data has been preserved — review and retry.
-          </p>
-        </div>
-      )}
+      {txError && <ErrorCard error={txError} onDismiss={() => setTxError(null)} />}
 
       {/* Hide the form after success */}
       {!successData && (
@@ -554,8 +737,8 @@ export default function SubscriptionForm() {
               aria-describedby={!publicKey ? 'hint-wallet' : undefined}
               className="w-full flex items-center justify-center gap-2 rounded-lg bg-blue-600
                          hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50
-                         disabled:cursor-not-allowed px-4 py-4 sm:py-5 text-base font-semibold
-                         transition-all duration-150 min-h-[56px] hover:shadow-lg active:shadow-md
+                         disabled:cursor-not-allowed px-4 py-3 text-sm font-semibold
+                         transition-all duration-150 min-h-[48px] hover:shadow-lg active:shadow-md
                          focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400
                          focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900"
             >

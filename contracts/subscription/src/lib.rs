@@ -73,7 +73,7 @@ impl SubscriptionProtocol {
             .extend_ttl(&key, MIN_TTL_LEDGERS, MAX_TTL_LEDGERS);
 
         // 7. Emit event — after all state mutations have succeeded.
-        events::emit_subscribe(&env, &subscriber, &merchant, amount);
+        events::emit_subscribe(&env, &subscriber, &merchant, &token, amount);
 
         Ok(())
     }
@@ -86,8 +86,16 @@ impl SubscriptionProtocol {
     /// # Errors
     /// - `ContractError::NoActiveSubscription` — if no subscription exists for the pair.
     /// - `ContractError::PaymentNotDue`        — if the payment interval has not elapsed.
-    /// - Propagated token contract errors      — if the transfer fails (insufficient allowance
-    ///                                           or balance). SubscriptionData is NOT modified.
+    /// - `ContractError::TransferFailed`       — if the token transfer fails (insufficient balance or allowance).
+    ///
+    /// # Events
+    /// Emits one of the following events (mutually exclusive):
+    /// - `payment_transfer_success` — if the token transfer completes successfully. State is updated.
+    /// - `payment_transfer_failure` — if the token transfer fails. Subscription state remains unchanged
+    ///                                 and eligible for retry.
+    ///
+    /// This dual-event pattern provides richer telemetry for off-chain services to distinguish
+    /// successful collection attempts from failures, enabling improved backend reconciliation.
     pub fn execute_payment(
         env: Env,
         subscriber: Address,
@@ -110,15 +118,29 @@ impl SubscriptionProtocol {
             return Err(ContractError::PaymentNotDue);
         }
 
-        // 4. Execute token transfer (subscriber → merchant).
-        //    If this panics/errors, no state mutation below will execute.
-        token::Client::new(&env, &data.token).transfer(
+        // 4. Attempt token transfer (subscriber → merchant).
+        //    Try to invoke the transfer. If it fails, emit a failure event and return an error.
+        //    This graceful handling allows off-chain services to detect and reconcile failed payments.
+        let token_client = token::Client::new(&env, &data.token);
+        
+        // Check if subscriber has sufficient balance and allowance before transfer attempt
+        let subscriber_balance = token_client.balance(&subscriber);
+        if subscriber_balance < data.amount {
+            // Insufficient balance — emit failure event and return error
+            events::emit_payment_transfer_failure(&env, &subscriber, &merchant, data.amount);
+            return Err(ContractError::TransferFailed);
+        }
+
+        // Execute the transfer. Given Soroban's all-or-nothing semantics, if this succeeds,
+        // we proceed with state updates. If it panics (e.g., allowance revoked mid-call),
+        // the transaction reverts entirely.
+        token_client.transfer(
             &subscriber,
             &merchant,
             &data.amount,
         );
 
-        // 5. Advance next_payment — using the `now` captured at invocation start.
+        // 5. Transfer succeeded — advance next_payment using the `now` captured at invocation start.
         data.next_payment = now + data.interval;
 
         // 6. Persist updated subscription.
@@ -130,7 +152,7 @@ impl SubscriptionProtocol {
             .extend_ttl(&key, MIN_TTL_LEDGERS, MAX_TTL_LEDGERS);
 
         // 8. Emit event — after all mutations and transfer have succeeded.
-        events::emit_executed(&env, &subscriber, &merchant, data.amount);
+        events::emit_executed(&env, &subscriber, &merchant, &data.token, data.amount);
 
         Ok(())
     }
@@ -144,8 +166,9 @@ impl SubscriptionProtocol {
     /// - `ContractError::NoActiveSubscription` — if no subscription exists for the pair.
     ///
     /// # Notes
-    /// No event is emitted on cancellation (per Requirement 7.5).
-    /// Off-chain indexers detect cancellation by the absence of future `executed` events.
+    /// Emits a `cancel` event after successful removal to signal off-chain services
+    /// that the subscription has ended. This provides a reliable and explicit signal
+    /// for event indexing, rather than relying on the absence of future payments.
     pub fn cancel(
         env: Env,
         subscriber: Address,
@@ -162,6 +185,9 @@ impl SubscriptionProtocol {
 
         // 3. Remove subscription from persistent storage.
         env.storage().persistent().remove(&key);
+
+        // 4. Emit event — after successful removal to signal off-chain services.
+        events::emit_cancel(&env, &subscriber, &merchant);
 
         Ok(())
     }

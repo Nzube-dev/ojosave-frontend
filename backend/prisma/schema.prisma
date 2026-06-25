@@ -1,0 +1,36 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Event {
+  id            Int      @id @default(autoincrement())
+  type          String   // "subscribe" or "executed"
+  subscriber    String
+  merchant      String
+  token         String?
+  amount        String   // Store as string to handle big integers
+  ledgerTimestamp BigInt
+  createdAt     DateTime @default(now())
+}
+
+model PayoutSummary {
+  id            Int      @id @default(autoincrement())
+  merchant      String
+  startDate     DateTime
+  endDate       DateTime
+  totalAmount   String   // Total amount for the period
+  paymentCount  Int      // Number of payments
+  currency      String   // Token address
+  createdAt     DateTime @default(now())
+  type          String   // "daily" or "weekly"
+}

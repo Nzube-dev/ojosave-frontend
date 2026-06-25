@@ -1,6 +1,6 @@
 # SorobanPay — Contract Event Reference
 
-The `SubscriptionProtocol` contract emits two structured events that off-chain consumers can use for indexing, analytics, and notifications.
+The `SubscriptionProtocol` contract emits four structured events that off-chain consumers can use for indexing, analytics, and notifications.
 
 Cancellation is intentionally not emitted by the contract. Backend services that need a durable cancellation history should persist confirmed `cancel(subscriber, merchant)` transactions in the off-chain audit trail described in [backend/audit-trail/README.md](../backend/audit-trail/README.md).
 
@@ -17,18 +17,44 @@ Emitted when `subscribe()` is called (new subscription or update).
 | topic[0] | `Symbol` | `"subscribe"` |
 | topic[1] | `Address` | subscriber address |
 | topic[2] | `Address` | merchant address |
+| topic[3] | `Address` | token contract address |
 | data | `i128` | subscription amount (in token stroops) |
 
 ### `executed`
 
-Emitted when `execute_payment()` successfully transfers tokens.
+Emitted when `execute_payment()` successfully transfers tokens and advances `next_payment`.
 
 | Field | Type | Value |
 |-------|------|-------|
 | topic[0] | `Symbol` | `"executed"` |
 | topic[1] | `Address` | subscriber address |
 | topic[2] | `Address` | merchant address |
+| topic[3] | `Address` | token contract address |
 | data | `i128` | amount transferred (in token stroops) |
+
+### `payment_transfer_failure`
+
+Emitted when `execute_payment()` is called but the subscriber has insufficient balance. The subscription state is **not** modified — the call can be retried once funds are available.
+
+| Field | Type | Value |
+|-------|------|-------|
+| topic[0] | `Symbol` | `"payment_transfer_failure"` |
+| topic[1] | `Address` | subscriber address |
+| topic[2] | `Address` | merchant address |
+| data | `i128` | amount that was attempted (in token stroops) |
+
+Note: if the transfer fails due to a revoked allowance (rather than insufficient balance), the token contract panics and the entire transaction reverts — no event is emitted in that case.
+
+### `cancel`
+
+Emitted when `cancel()` successfully removes the subscription.
+
+| Field | Type | Value |
+|-------|------|-------|
+| topic[0] | `Symbol` | `"cancel"` |
+| topic[1] | `Address` | subscriber address |
+| topic[2] | `Address` | merchant address |
+| data | `()` | empty (unit type) |
 
 ---
 
@@ -76,6 +102,7 @@ interface SubscribeEvent {
   type: "subscribe";
   subscriber: string;
   merchant: string;
+  token: string;
   amount: bigint;
 }
 
@@ -83,10 +110,28 @@ interface ExecutedEvent {
   type: "executed";
   subscriber: string;
   merchant: string;
+  token: string;
   amount: bigint;
 }
 
-type ContractEvent = SubscribeEvent | ExecutedEvent;
+interface PaymentTransferFailureEvent {
+  type: "payment_transfer_failure";
+  subscriber: string;
+  merchant: string;
+  amount: bigint;
+}
+
+interface CancelEvent {
+  type: "cancel";
+  subscriber: string;
+  merchant: string;
+}
+
+type ContractEvent =
+  | SubscribeEvent
+  | ExecutedEvent
+  | PaymentTransferFailureEvent
+  | CancelEvent;
 
 function decodeEvent(rawEvent: {
   topic: string[];   // base64-encoded XDR ScVal[]
@@ -97,10 +142,19 @@ function decodeEvent(rawEvent: {
   );
   const data = scValToNative(xdr.ScVal.fromXDR(rawEvent.value, "base64"));
 
-  const [eventType, subscriber, merchant] = topics as [string, string, string];
+  const [eventType] = topics as string[];
 
   if (eventType === "subscribe" || eventType === "executed") {
+    const [, subscriber, merchant, token] = topics as string[];
+    return { type: eventType, subscriber, merchant, token, amount: BigInt(data) };
+  }
+  if (eventType === "payment_transfer_failure") {
+    const [, subscriber, merchant] = topics as string[];
     return { type: eventType, subscriber, merchant, amount: BigInt(data) };
+  }
+  if (eventType === "cancel") {
+    const [, subscriber, merchant] = topics as string[];
+    return { type: eventType, subscriber, merchant };
   }
   return null;
 }
@@ -138,8 +192,12 @@ events.forEach((e) => {
   if (!e) return;
   if (e.type === "subscribe") {
     console.log(`New subscription: ${e.subscriber} → ${e.merchant}, amount: ${e.amount}`);
-  } else {
+  } else if (e.type === "executed") {
     console.log(`Payment executed: ${e.subscriber} → ${e.merchant}, amount: ${e.amount}`);
+  } else if (e.type === "payment_transfer_failure") {
+    console.log(`Payment failed (retry eligible): ${e.subscriber} → ${e.merchant}, attempted: ${e.amount}`);
+  } else if (e.type === "cancel") {
+    console.log(`Subscription cancelled: ${e.subscriber} → ${e.merchant}`);
   }
 });
 ```

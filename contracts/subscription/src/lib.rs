@@ -7,7 +7,32 @@ mod storage;
 use soroban_sdk::{contract, contractimpl, token, Address, Env, Symbol};
 
 use crate::error::ContractError;
-use crate::storage::{DataKey, SubscriptionData, MAX_TTL_LEDGERS, MIN_TTL_LEDGERS};
+use crate::storage::{DataKey, SubscriptionData, MAX_AMOUNT, MAX_TTL_LEDGERS, MIN_TTL_LEDGERS};
+
+// ─── Internal helpers ─────────────────────────────────────────────────────────
+
+/// Return the current ledger timestamp, or `InvalidTimestamp` if it is zero.
+///
+/// A zero timestamp indicates the ledger clock is uninitialised (e.g. certain
+/// mock environments or unusual network states). Treating it as invalid prevents
+/// silently computing a `next_payment` anchored at the Unix epoch.
+#[inline]
+fn ledger_timestamp(env: &Env) -> Result<u64, ContractError> {
+    let ts = env.ledger().timestamp();
+    if ts == 0 {
+        return Err(ContractError::InvalidTimestamp);
+    }
+    Ok(ts)
+}
+
+/// Add `interval` to `ts`, returning `InvalidTimestamp` on overflow instead of
+/// wrapping or panicking.
+#[inline]
+fn checked_next_payment(ts: u64, interval: u64) -> Result<u64, ContractError> {
+    ts.checked_add(interval).ok_or(ContractError::InvalidTimestamp)
+}
+
+// ─── Contract ─────────────────────────────────────────────────────────────────
 
 // ─── Token Transfer Helpers ──────────────────────────────────────────────────────
 
@@ -100,13 +125,15 @@ impl SubscriptionProtocol {
     /// - `subscriber`: Account that will be charged on each payment interval.
     /// - `merchant`:   Account that receives payments.
     /// - `token`:      SEP-41 token contract address.
-    /// - `amount`:     Payment amount per interval. Must be > 0.
+    /// - `amount`:     Payment amount per interval. Must be > 0 and <= 10^18.
     /// - `interval`:   Seconds between payments. Must be in [86400, 31536000].
     ///
     /// # Errors
     /// - `ContractError::AmountMustBePositive` — if `amount <= 0`.
+    /// - `ContractError::AmountTooLarge`       — if `amount > 10^18`.
     /// - `ContractError::IntervalTooShort`     — if `interval < 86400`.
     /// - `ContractError::IntervalTooLong`      — if `interval > 31536000`.
+    /// - `ContractError::InvalidTimestamp`     — if ledger timestamp is zero or overflows.
     pub fn subscribe(
         env: Env,
         subscriber: Address,
@@ -122,6 +149,9 @@ impl SubscriptionProtocol {
         if amount <= 0 {
             return Err(ContractError::AmountMustBePositive);
         }
+        if amount > MAX_AMOUNT {
+            return Err(ContractError::AmountTooLarge);
+        }
 
         // 3. Validate interval.
         if interval < 86_400 {
@@ -132,9 +162,12 @@ impl SubscriptionProtocol {
         }
 
         // 4. Build subscription record.
-        let next_payment = env.ledger().timestamp() + interval;
+        //    Guard against an uninitialised ledger clock (zero timestamp) and
+        //    against arithmetic overflow when projecting the first due date.
+        let ts           = ledger_timestamp(&env)?;
+        let next_payment = checked_next_payment(ts, interval)?;
         let data = SubscriptionData {
-            token,
+            token: token.clone(),
             amount,
             interval,
             next_payment,
@@ -164,6 +197,7 @@ impl SubscriptionProtocol {
     /// - `ContractError::NoActiveSubscription` — if no subscription exists for the pair.
     /// - `ContractError::PaymentNotDue`        — if the payment interval has not elapsed.
     /// - `ContractError::TransferFailed`       — if the token transfer fails (insufficient balance or allowance).
+    /// - `ContractError::InvalidTimestamp`     — if ledger timestamp is zero.
     ///
     /// # Events
     /// Emits one of the following events (mutually exclusive):
@@ -190,7 +224,8 @@ impl SubscriptionProtocol {
             .ok_or(ContractError::NoActiveSubscription)?;
 
         // 3. Enforce time-lock.
-        let now = env.ledger().timestamp();
+        //    Guard against an uninitialised ledger clock before comparing timestamps.
+        let now = ledger_timestamp(&env)?;
         if now < data.next_payment {
             return Err(ContractError::PaymentNotDue);
         }

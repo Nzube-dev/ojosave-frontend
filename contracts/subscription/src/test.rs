@@ -193,6 +193,94 @@ fn test_execute_payment_before_due_time() {
     assert_eq!(d.interval, ivl);
 }
 
+// ─── Requirement 13.2b — No double payment within same interval ──────────────
+
+/// After a successful execute_payment, the next_payment timestamp is advanced by one
+/// interval. A second immediate call must return PaymentNotDue because the new
+/// next_payment lies in the future, preventing any double-charge within the same
+/// billing period.
+#[test]
+fn test_no_double_payment_within_same_interval() {
+    let t   = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+
+    // Advance just past the first due timestamp.
+    t.advance(ivl + 1);
+
+    let sb_before = t.sub_bal();
+    let mb_before = t.mer_bal();
+
+    // First call — must succeed and transfer funds.
+    t.client.execute_payment(&t.subscriber, &t.merchant);
+    assert_eq!(t.sub_bal(), sb_before - amt, "first payment must debit subscriber");
+    assert_eq!(t.mer_bal(), mb_before + amt, "first payment must credit merchant");
+
+    // next_payment is now `now + interval` — still in the future.
+    let d = t.get_sub();
+    assert!(
+        d.next_payment > t.env.ledger().timestamp(),
+        "next_payment must be in the future after a successful payment"
+    );
+
+    // Second immediate call — must be rejected; no funds may move.
+    let r = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(
+        matches!(r, Err(Ok(ContractError::PaymentNotDue))),
+        "second execute_payment before next interval must return PaymentNotDue"
+    );
+    assert_eq!(t.sub_bal(), sb_before - amt, "subscriber balance must not change on rejected second attempt");
+    assert_eq!(t.mer_bal(), mb_before + amt, "merchant balance must not change on rejected second attempt");
+
+    // Subscription state must remain intact (subscription is not cancelled on error).
+    assert!(t.has_sub(), "subscription must still exist after rejected double-payment attempt");
+}
+
+// ─── Requirement 13.2b — Double payment prevention ───────────────────────────
+
+/// Verifies that `execute_payment` returns `PaymentNotDue` if called a second time
+/// immediately after a successful payment, before the next interval has elapsed.
+///
+/// The contract must advance `next_payment` by `interval` on success so that any
+/// retry within the same window is rejected, preventing double charges.
+#[test]
+fn test_execute_payment_double_payment_prevented() {
+    let t   = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    // (a) Subscribe and advance past the first due date.
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    t.advance(ivl + 1);
+
+    let sub_bal_before = t.sub_bal();
+    let mer_bal_before = t.mer_bal();
+
+    // (b) First execute_payment must succeed and transfer funds.
+    t.client.execute_payment(&t.subscriber, &t.merchant);
+    assert_eq!(t.sub_bal(), sub_bal_before - amt, "first payment must debit subscriber");
+    assert_eq!(t.mer_bal(), mer_bal_before + amt, "first payment must credit merchant");
+
+    // Capture the advanced next_payment timestamp.
+    let next = t.get_sub().next_payment;
+
+    // (c) Immediate retry — no time has passed, so next_payment has not elapsed.
+    let result = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(
+        matches!(result, Err(Ok(ContractError::PaymentNotDue))),
+        "second execute_payment within the same interval must return PaymentNotDue"
+    );
+
+    // (d) Balances must be unchanged after the failed retry.
+    assert_eq!(t.sub_bal(), sub_bal_before - amt, "subscriber balance must not change on retry");
+    assert_eq!(t.mer_bal(), mer_bal_before + amt, "merchant balance must not change on retry");
+
+    // (e) next_payment must remain unchanged — the failed call must not mutate state.
+    assert_eq!(t.get_sub().next_payment, next, "next_payment must not advance on failed retry");
+}
+
 // ─── Requirement 13.3 — Execute after cancel ─────────────────────────────────
 
 #[test]
@@ -1457,5 +1545,170 @@ fn load_test_bulk_execute_payment() {
             token::Client::new(&env, &token).balance(sub),
             10_000 - amt
         );
+    }
+}
+
+// ─── InvalidTimestamp guard tests ────────────────────────────────────────────
+
+/// `subscribe` must return `InvalidTimestamp` when the ledger clock is zero
+/// (uninitialised mock or unusual environment).
+#[test]
+fn test_subscribe_zero_timestamp_returns_invalid_timestamp() {
+    let t = T::new();
+
+    // Force ledger timestamp to zero to simulate an uninitialised clock.
+    t.env.ledger().with_mut(|l| l.timestamp = 0);
+
+    let r = t.client.try_subscribe(
+        &t.subscriber,
+        &t.merchant,
+        &t.token,
+        &100_000_i128,
+        &86_400_u64,
+    );
+    assert!(
+        matches!(r, Err(Ok(ContractError::InvalidTimestamp))),
+        "subscribe must return InvalidTimestamp when ledger timestamp is 0"
+    );
+    assert!(!t.has_sub(), "no subscription must be created with a zero timestamp");
+}
+
+/// `subscribe` must return `InvalidTimestamp` when `timestamp + interval` would
+/// overflow a u64 (attacker-controlled or extremely large timestamp).
+#[test]
+fn test_subscribe_timestamp_overflow_returns_invalid_timestamp() {
+    let t = T::new();
+
+    // Set timestamp so that adding even the minimum interval overflows u64.
+    t.env.ledger().with_mut(|l| l.timestamp = u64::MAX);
+
+    let r = t.client.try_subscribe(
+        &t.subscriber,
+        &t.merchant,
+        &t.token,
+        &100_000_i128,
+        &86_400_u64, // any positive interval will overflow from u64::MAX
+    );
+    assert!(
+        matches!(r, Err(Ok(ContractError::InvalidTimestamp))),
+        "subscribe must return InvalidTimestamp on u64 overflow"
+    );
+    assert!(!t.has_sub(), "no subscription must be created on overflow");
+}
+
+/// `execute_payment` must return `InvalidTimestamp` when the ledger clock is
+/// zero — even for an active, past-due subscription.
+#[test]
+fn test_execute_payment_zero_timestamp_returns_invalid_timestamp() {
+    let t   = T::new();
+    let ivl = 86_400_u64;
+
+    // Create a valid subscription at a normal timestamp.
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &100_000_i128, &ivl);
+
+    // Corrupt the clock to zero after subscription creation.
+    t.env.ledger().with_mut(|l| l.timestamp = 0);
+
+    let r = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(
+        matches!(r, Err(Ok(ContractError::InvalidTimestamp))),
+        "execute_payment must return InvalidTimestamp when ledger timestamp is 0"
+    );
+
+    // Subscription state must be untouched.
+    assert!(t.has_sub(), "subscription must remain intact on timestamp error");
+}
+
+// ─── Requirement: Amount upper-bound guard ────────────────────────────────────
+
+use crate::storage::MAX_AMOUNT;
+
+/// Amount exactly at the maximum threshold must be accepted.
+#[test]
+fn test_subscribe_amount_at_max_accepted() {
+    let t = T::new();
+    // We only check the error path here; storage won't have enough balance for
+    // execution, but subscribe itself must not reject a valid amount.
+    let r = t.client.try_subscribe(
+        &t.subscriber,
+        &t.merchant,
+        &t.token,
+        &MAX_AMOUNT,
+        &86_400_u64,
+    );
+    // subscribe should succeed (Ok(())) — the amount is within bounds.
+    assert!(r.is_ok(), "amount equal to MAX_AMOUNT must be accepted");
+}
+
+/// Amount one above the maximum threshold must be rejected with AmountTooLarge.
+#[test]
+fn test_subscribe_amount_one_above_max_rejected() {
+    let t = T::new();
+    let r = t.client.try_subscribe(
+        &t.subscriber,
+        &t.merchant,
+        &t.token,
+        &(MAX_AMOUNT + 1),
+        &86_400_u64,
+    );
+    assert!(
+        matches!(r, Err(Ok(ContractError::AmountTooLarge))),
+        "amount MAX_AMOUNT + 1 must return AmountTooLarge"
+    );
+    assert!(!t.has_sub(), "no subscription must be created for an oversized amount");
+}
+
+/// i128::MAX must be rejected with AmountTooLarge.
+#[test]
+fn test_subscribe_amount_i128_max_rejected() {
+    let t = T::new();
+    let r = t.client.try_subscribe(
+        &t.subscriber,
+        &t.merchant,
+        &t.token,
+        &i128::MAX,
+        &86_400_u64,
+    );
+    assert!(
+        matches!(r, Err(Ok(ContractError::AmountTooLarge))),
+        "i128::MAX must be rejected as AmountTooLarge"
+    );
+    assert!(!t.has_sub());
+}
+
+/// No event must be emitted when the amount exceeds the threshold.
+#[test]
+fn test_subscribe_amount_too_large_emits_no_event() {
+    let t = T::new();
+    let _ = t.client.try_subscribe(
+        &t.subscriber,
+        &t.merchant,
+        &t.token,
+        &(MAX_AMOUNT + 1),
+        &86_400_u64,
+    );
+    assert_eq!(
+        t.env.events().all().len(),
+        0,
+        "no event must be emitted for a rejected oversized amount"
+    );
+}
+
+proptest! {
+    /// Property: any amount above MAX_AMOUNT is always rejected.
+    #[test]
+    fn prop_amount_above_max_always_rejected(
+        excess in 1_i128..=i128::MAX - MAX_AMOUNT,
+    ) {
+        let t = T::new();
+        let r = t.client.try_subscribe(
+            &t.subscriber,
+            &t.merchant,
+            &t.token,
+            &(MAX_AMOUNT + excess),
+            &86_400_u64,
+        );
+        prop_assert!(matches!(r, Err(Ok(ContractError::AmountTooLarge))));
+        prop_assert!(!t.has_sub());
     }
 }

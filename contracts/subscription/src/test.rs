@@ -855,6 +855,73 @@ fn test_execute_payment_fails_on_insufficient_balance_state_unchanged() {
     assert_eq!(events_after.len(), 1, "no executed event on failed transfer");
 }
 
+// ─── Transfer failure — subscription state must remain unchanged ──────────────
+
+/// Req: failed transfer due to zero allowance must not mutate subscription state.
+#[test]
+fn test_execute_payment_fails_with_zero_allowance() {
+    let t   = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let before = t.get_sub();
+
+    // Revoke allowance so the token transfer will fail.
+    token::Client::new(&t.env, &t.token).approve(
+        &t.subscriber,
+        &t.contract_id,
+        &0_i128,
+        &(t.env.ledger().sequence() + 1_u32),
+    );
+
+    t.advance(ivl + 1);
+
+    // execute_payment should fail at the token transfer level (host error).
+    let r = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(r.is_err());
+    assert!(!matches!(r, Err(Ok(_))), "must not be a ContractError — it's a host-level panic");
+
+    // Subscription record is unchanged: next_payment was NOT advanced.
+    let after = t.get_sub();
+    assert_eq!(after.next_payment, before.next_payment);
+    assert_eq!(after.amount,       before.amount);
+    assert_eq!(t.sub_bal(),        10_000_000_i128);
+}
+
+/// Req: failed transfer due to insufficient balance must not mutate subscription state.
+#[test]
+fn test_execute_payment_fails_with_insufficient_balance() {
+    let t = T::new();
+    // Subscribe for more than the subscriber's entire balance.
+    let amt = 20_000_000_i128; // subscriber only has 10_000_000
+    let ivl = 86_400_u64;
+
+    // Approve a large allowance so the allowance check passes.
+    token::Client::new(&t.env, &t.token).approve(
+        &t.subscriber,
+        &t.contract_id,
+        &amt,
+        &(t.env.ledger().sequence() + 100_000_u32),
+    );
+
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let before = t.get_sub();
+
+    t.advance(ivl + 1);
+
+    // execute_payment should fail at the token transfer level (insufficient balance).
+    let r = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(r.is_err());
+    assert!(!matches!(r, Err(Ok(_))), "must not be a ContractError — it's a host-level panic");
+
+    // Subscription record is unchanged: next_payment was NOT advanced.
+    let after = t.get_sub();
+    assert_eq!(after.next_payment, before.next_payment);
+    assert_eq!(after.amount,       before.amount);
+    assert_eq!(t.sub_bal(),        10_000_000_i128);
+}
+
 // ─── Property-Based Tests ─────────────────────────────────────────────────────
 
 use proptest::prelude::*;

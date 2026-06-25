@@ -18,4 +18,10 @@ pub enum ContractError {
     PaymentNotDue        = 5,
     /// Authorization check failed (supplementary; require_auth() panics directly)
     Unauthorized         = 6,
+    /// `execute_payment` token transfer failed (insufficient balance or allowance)
+    TransferFailed       = 7,
+    /// ledger timestamp is zero or would overflow when computing next_payment
+    InvalidTimestamp     = 8,
+    /// `subscribe` called with amount exceeding the safe maximum threshold
+    AmountTooLarge       = 9,
 }

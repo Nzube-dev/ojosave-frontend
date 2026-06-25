@@ -389,6 +389,30 @@ Steps to resolve:
 
 ---
 
+## Wallet connection UX states
+
+The `SubscriptionForm` component reflects the wallet and transaction lifecycle through distinct visual states. Contributors should maintain these states when modifying the form.
+
+| State | Trigger | UI indicator | Submit button |
+|-------|---------|-------------|---------------|
+| **Disconnected** | `publicKey` is `null` (Freighter not connected or not approved) | Gray badge: "Disconnected" with dim dot | Disabled; yellow hint: "Connect your Freighter wallet to enable submission." |
+| **Connected / idle** | `publicKey` is set, `isSubmitting` is `false` | Green badge: "Connected" with green dot | Enabled: "Authorize Subscription" |
+| **Awaiting signature** | `isSubmitting` is `true` (transaction sent to Freighter, waiting for user approval) | Blue animated spinner + progress bar with label "Submitting transaction…" | Disabled: "Submitting…" with spinner |
+| **Success** | `successData` is set after transaction confirmed | Green `SuccessCard` with tx hash, summary, and next-steps guidance | Hidden; replaced by "Create another subscription" button |
+| **Error** | `txError` is set after a failed or rejected transaction | Red alert box with error message and "Your form data has been preserved — review and retry." | Re-enabled; form data retained for correction |
+
+### State transition diagram
+
+```
+Disconnected ──(connect Freighter)──► Connected/idle
+Connected/idle ──(submit form)──► Awaiting signature
+Awaiting signature ──(user approves)──► Success
+Awaiting signature ──(user rejects / timeout / RPC error)──► Error
+Error ──(fix form & resubmit)──► Awaiting signature
+Success ──(click "Create another")──► Connected/idle
+```
+
+---
 
 ## Contract entry points
 

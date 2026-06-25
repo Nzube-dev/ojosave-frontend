@@ -12,6 +12,24 @@
  *  - Enhanced success state with next-steps guidance
  *  - Progress indicator (animated bar) during async transaction
  *  - Contract config error card with remediation steps
+ *
+ * ## Wallet connection UX states
+ *
+ * | State              | Trigger                                      | UI indicator                                      | Submit button                        |
+ * |--------------------|----------------------------------------------|---------------------------------------------------|--------------------------------------|
+ * | Disconnected       | `publicKey` is null                          | Gray "Disconnected" badge                         | Disabled; yellow wallet hint shown   |
+ * | Connected / idle   | `publicKey` set, `isSubmitting` false        | Green "Connected" badge                           | Enabled: "Authorize Subscription"    |
+ * | Awaiting signature | `isSubmitting` true                          | Blue spinner + animated progress bar              | Disabled: "Submitting…" + spinner    |
+ * | Success            | `successData` set after tx confirmed         | Green SuccessCard (tx hash + next-steps)          | Hidden; "Create another" shown       |
+ * | Error              | `txError` set after failure/rejection        | Red alert with message; form data preserved       | Re-enabled for retry                 |
+ *
+ * State transitions:
+ *   Disconnected → Connected/idle (connect Freighter)
+ *   Connected/idle → Awaiting signature (submit form)
+ *   Awaiting signature → Success (user approves)
+ *   Awaiting signature → Error (user rejects / timeout / RPC error)
+ *   Error → Awaiting signature (fix & resubmit)
+ *   Success → Connected/idle (click "Create another")
  */
 
 import { useState, useEffect, useCallback, type FormEvent } from 'react';

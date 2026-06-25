@@ -6,17 +6,9 @@ import { validateConfig } from './lib/config';
 import { EventIndexer } from './services/eventIndexer';
 import { PayoutSummaryGenerator } from './services/payoutSummaryGenerator';
 import summariesRouter from './routes/summaries';
-import { buildHealthRouter } from './routes/health';
-
-// Validate config first — exits with a clear error if anything is missing/wrong
-const config = (() => {
-  try {
-    return validateConfig();
-  } catch (err) {
-    console.error((err as Error).message);
-    process.exit(1);
-  }
-})();
+import subscriptionsRouter from './routes/subscriptions';
+import auditLogsRouter from './routes/auditLogs';
+import { apiLimiter } from './middleware/rateLimiter';
 
 const app = express();
 const { port: PORT, rpcUrl, contractId } = config;
@@ -24,10 +16,16 @@ const { port: PORT, rpcUrl, contractId } = config;
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(apiLimiter);
 
 // Routes
 app.use('/api/summaries', summariesRouter);
-app.use('/health', buildHealthRouter(rpcUrl, contractId));
+app.use('/api/subscriptions', subscriptionsRouter);
+app.use('/api/audit-logs', auditLogsRouter);
+
+// Initialize services
+const rpcUrl = process.env.RPC_URL || 'https://soroban-testnet.stellar.org';
+const contractId = process.env.CONTRACT_ID || '';
 
 const eventIndexer = new EventIndexer(rpcUrl, contractId);
 const summaryGenerator = new PayoutSummaryGenerator();

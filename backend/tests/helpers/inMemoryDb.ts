@@ -30,7 +30,7 @@ export class InMemorySubscriptionDB implements SubscriptionDB {
   }
 
   all(): StoredSubscription[] {
-    return [...this.store.values()];
+    return Array.from(this.store.values());
   }
 
   clear(): void {
@@ -76,13 +76,13 @@ export class InMemoryPrismaClient {
 
   event = {
     findFirst: async (args: { where: Partial<StoredEvent> }) => {
-      return this.events.find((e) => this.matches(e, args.where)) ?? null;
+      return this.events.find((e) => this.matchesEvent(e, args.where as any)) ?? null;
     },
     findMany: async (args?: { where?: Partial<StoredEvent & { createdAt?: { gte?: Date; lte?: Date } }> }) => {
       if (!args?.where) return [...this.events];
       return this.events.filter((e) => {
         const { createdAt, ...rest } = args.where as any;
-        if (!this.matches(e, rest)) return false;
+        if (!this.matchesEvent(e, rest)) return false;
         if (createdAt?.gte && e.createdAt < createdAt.gte) return false;
         if (createdAt?.lte && e.createdAt > createdAt.lte) return false;
         return true;
@@ -101,11 +101,11 @@ export class InMemoryPrismaClient {
 
   payoutSummary = {
     findFirst: async (args: { where: Partial<StoredSummary> }) => {
-      return this.summaries.find((s) => this.matches(s, args.where)) ?? null;
+      return this.summaries.find((s) => this.matchesSummary(s, args.where as any)) ?? null;
     },
     findMany: async (args?: { where?: Partial<StoredSummary>; orderBy?: object }) => {
       if (!args?.where) return [...this.summaries];
-      return this.summaries.filter((s) => this.matches(s, args.where!));
+      return this.summaries.filter((s) => this.matchesSummary(s, args.where!));
     },
     create: async (args: { data: Omit<StoredSummary, 'id' | 'createdAt'> }) => {
       const record: StoredSummary = {
@@ -124,6 +124,20 @@ export class InMemoryPrismaClient {
     },
   };
 
+  private matchesEvent(record: StoredEvent, where: Record<string, any>): boolean {
+    return Object.entries(where).every(([k, v]) => {
+      if (v === undefined) return true;
+      return String((record as any)[k]) === String(v);
+    });
+  }
+
+  private matchesSummary(record: StoredSummary, where: Record<string, any>): boolean {
+    return Object.entries(where).every(([k, v]) => {
+      if (v === undefined) return true;
+      return String((record as any)[k]) === String(v);
+    });
+  }
+
   /** Seed events directly for test setup. */
   seedEvents(events: Omit<StoredEvent, 'id' | 'createdAt'>[]): void {
     for (const e of events) {
@@ -136,12 +150,5 @@ export class InMemoryPrismaClient {
     this.summaries = [];
     this.nextEventId = 1;
     this.nextSummaryId = 1;
-  }
-
-  private matches(record: Record<string, unknown>, where: Record<string, unknown>): boolean {
-    return Object.entries(where).every(([k, v]) => {
-      if (v === undefined) return true;
-      return String(record[k]) === String(v);
-    });
   }
 }

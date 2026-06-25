@@ -43,7 +43,7 @@ function get(url: string): Promise<{ status: number; body: unknown }> {
 let server: http.Server;
 let baseUrl: string;
 
-beforeAll((done) => {
+beforeAll((done: jest.DoneCallback) => {
   const app = express();
   app.use(express.json());
   app.use('/api/summaries', summariesRouter);

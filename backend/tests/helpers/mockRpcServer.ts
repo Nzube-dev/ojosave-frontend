@@ -5,7 +5,7 @@
  * Avoids real network calls in integration tests.
  */
 
-import http from 'http';
+import * as http from 'http';
 
 export interface MockRpcEvent {
   type: string;      // "subscribe" | "executed"

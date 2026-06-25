@@ -63,7 +63,7 @@ describe('generateDailySummaries', () => {
 
     const summaries = await db.payoutSummary.findMany({ where: { merchant: MERCHANT } });
     expect(summaries).toHaveLength(2);
-    const tokens = summaries.map((s) => s.currency).sort();
+    const tokens = summaries.map((s: any) => s.currency).sort();
     expect(tokens).toEqual([TOKEN, TOKEN2].sort());
   });
 

@@ -48,7 +48,7 @@ describe('subscribe event', () => {
 
     const { repairs } = reconcile(events, db, INTERVAL);
 
-    const updateRepair = repairs.find((r) => r.kind === 'update');
+    const updateRepair = repairs.find((r: any) => r.kind === 'update');
     expect(updateRepair).toBeDefined();
     expect(db.get(SUBSCRIBER, MERCHANT)!.amount).toBe(200n);
   });
@@ -102,6 +102,6 @@ describe('orphan detection', () => {
 
     const { errors } = reconcile([], db, INTERVAL);
 
-    expect(errors.some((e) => e.includes('orphan'))).toBe(true);
+    expect(errors.some((e: any) => e.includes('orphan'))).toBe(true);
   });
 });

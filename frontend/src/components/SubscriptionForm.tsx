@@ -486,10 +486,10 @@ function ErrorCard({ error, onDismiss }: { error: TxErrorInfo; onDismiss: () => 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function SubscriptionForm() {
+  const { publicKey } = useWallet();
+
   // Guard: must have a valid contract address before rendering the form
   if (!CONTRACT_ID) return <ContractConfigError />;
-
-  const { publicKey } = useWallet();
 
   const [merchantAddress, setMerchantAddress] = useState('');
   const [tokenAddress, setTokenAddress]       = useState('');

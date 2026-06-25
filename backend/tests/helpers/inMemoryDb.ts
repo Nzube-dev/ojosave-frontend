@@ -13,20 +13,20 @@ import type { SubscriptionDB, StoredSubscription } from '../../reconciler';
 export class InMemorySubscriptionDB implements SubscriptionDB {
   private store = new Map<string, StoredSubscription>();
 
-  private key(subscriber: string, merchant: string) {
-    return `${subscriber}:${merchant}`;
+  private key(subscriber: string, merchant: string, token: string) {
+    return `${subscriber}:${merchant}:${token}`;
   }
 
-  get(subscriber: string, merchant: string): StoredSubscription | undefined {
-    return this.store.get(this.key(subscriber, merchant));
+  get(subscriber: string, merchant: string, token: string): StoredSubscription | undefined {
+    return this.store.get(this.key(subscriber, merchant, token));
   }
 
   upsert(record: StoredSubscription): void {
-    this.store.set(this.key(record.subscriber, record.merchant), record);
+    this.store.set(this.key(record.subscriber, record.merchant, record.token), record);
   }
 
-  delete(subscriber: string, merchant: string): void {
-    this.store.delete(this.key(subscriber, merchant));
+  delete(subscriber: string, merchant: string, token: string): void {
+    this.store.delete(this.key(subscriber, merchant, token));
   }
 
   all(): StoredSubscription[] {
@@ -100,6 +100,9 @@ export class InMemoryPrismaClient {
   };
 
   payoutSummary = {
+    findUnique: async (args: { where: { id: number } }) => {
+      return this.summaries.find((s) => s.id === args.where.id) ?? null;
+    },
     findFirst: async (args: { where: Partial<StoredSummary> }) => {
       return this.summaries.find((s) => this.matchesSummary(s, args.where as any)) ?? null;
     },

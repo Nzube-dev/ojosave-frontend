@@ -335,12 +335,57 @@ npm run type-check
 
 ### Troubleshooting Freighter
 
+#### Connection errors
+
+**Symptom:** "Wallet not connected" badge appears and the Submit button is disabled.
+
+Steps to resolve:
+1. Click the Freighter extension icon in your browser toolbar.
+2. If the site is not listed under "Connected Sites", click **Connect** and approve the connection prompt.
+3. Reload the page — the badge should turn green.
+
+**Symptom:** Freighter popup does not appear when the page loads.
+
+Steps to resolve:
+1. Confirm the Freighter extension is installed (Chrome/Brave or Firefox — see [Install Freighter](#1-install-freighter)).
+2. Make sure the page is served over `http://localhost` or `https://`. Freighter blocks requests from `file://` origins.
+3. Disable other wallet extensions temporarily — they can conflict with the Freighter injected API.
+4. Try a hard reload (`Ctrl+Shift+R` / `Cmd+Shift+R`).
+
+#### Signing / permission failures
+
+**Symptom:** Transaction rejected — "User declined" or signing popup dismissed.
+
+Steps to resolve:
+1. Open Freighter and confirm the correct account is selected.
+2. Re-submit the form; Freighter will show the signing prompt again.
+3. If Freighter closes before you can sign, disable browser pop-up blockers for `localhost`.
+
+**Symptom:** Transaction rejected — wrong network.
+
+Steps to resolve:
+1. Open Freighter → click the network name at the top-right.
+2. Select the network that matches `NEXT_PUBLIC_NETWORK_PASSPHRASE` in your `.env.local`:
+   - Testnet passphrase: `Test SDF Network ; September 2015`
+   - Mainnet passphrase: `Public Global Stellar Network ; September 2015`
+3. Reload and retry.
+
+**Symptom:** "Insufficient balance" error.
+
+Steps to resolve:
+- **Testnet:** fund your wallet at [Stellar Friendbot](https://laboratory.stellar.org/#account-creator?network=test).
+- **Mainnet:** transfer at least 2 XLM to your account to cover the base reserve and transaction fee.
+
+#### Quick-reference table
+
 | Symptom | Fix |
 |---------|-----|
-| "Wallet not connected" | Click the Freighter icon and approve the site connection |
-| Transaction rejected — wrong network | Match the Freighter network with `NEXT_PUBLIC_NETWORK_PASSPHRASE` |
-| "Insufficient balance" | Fund the account (Friendbot on testnet; real XLM on mainnet) |
-| Freighter not detected | Ensure the extension is installed and the page is served over `http://localhost` or `https://` |
+| "Wallet not connected" badge | Open Freighter and approve the site connection |
+| Signing popup never appears | Serve the app over `http://localhost` or `https://`; disable conflicting extensions |
+| Transaction rejected — wrong network | Match Freighter's network selector to `NEXT_PUBLIC_NETWORK_PASSPHRASE` |
+| "Insufficient balance" | Fund via Friendbot (testnet) or send XLM (mainnet) |
+| Freighter not detected | Install the extension; page must be on `http://localhost` or `https://` |
+| Popup closes before signing | Disable pop-up blockers for `localhost` |
 
 ---
 

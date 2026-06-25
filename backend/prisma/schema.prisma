@@ -17,7 +17,7 @@ model Event {
   type          String   // "subscribe" or "executed"
   subscriber    String
   merchant      String
-  token         String?
+  token         String
   amount        String   // Store as string to handle big integers
   ledgerTimestamp BigInt
   createdAt     DateTime @default(now())

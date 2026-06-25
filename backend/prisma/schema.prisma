@@ -23,6 +23,19 @@ model Event {
   createdAt     DateTime @default(now())
 }
 
+model AuditLog {
+  id               Int      @id @default(autoincrement())
+  eventType        String
+  subscriber       String
+  merchant         String
+  token            String
+  amount           String
+  transactionHash  String   @unique
+  ledger           BigInt
+  status           String   @default("executed")
+  createdAt        DateTime @default(now())
+}
+
 model PayoutSummary {
   id            Int      @id @default(autoincrement())
   merchant      String

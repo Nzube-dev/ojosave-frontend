@@ -177,7 +177,7 @@ function ContractConfigError() {
         </div>
 
         <div className="border-t border-yellow-600/30 pt-4">
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-gray-300">
             📖 For full details, see <code className="bg-gray-800/60 px-1.5 py-0.5 rounded text-yellow-300">README.md → Frontend → Environment variables</code>
           </p>
         </div>
@@ -199,12 +199,12 @@ function ProgressBar() {
           </svg>
           <span className="text-sm font-medium text-blue-300">Submitting transaction…</span>
         </div>
-        <span className="text-xs text-blue-300/60 animate-pulse">Processing on blockchain</span>
+        <span className="text-xs text-blue-200 animate-pulse">Processing on blockchain</span>
       </div>
       <div className="h-2 w-full bg-gray-700 rounded-full overflow-hidden shadow-inner">
         <div className="h-full bg-gradient-to-r from-blue-400 via-blue-500 to-blue-400 rounded-full animate-progress" />
       </div>
-      <p className="mt-2 text-xs text-gray-400 text-center">
+      <p className="mt-2 text-xs text-gray-300 text-center">
         This may take 10-30 seconds. Keep the window open.
       </p>
     </div>
@@ -240,11 +240,11 @@ function SuccessCard({
 
       {/* Summary */}
       <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs text-gray-300 bg-gray-800/30 rounded-lg p-3">
-        <span className="text-gray-400 font-medium">Amount</span>
+        <span className="text-gray-300 font-medium">Amount</span>
         <span className="font-medium">{data.amount} tokens</span>
-        <span className="text-gray-400 font-medium">Interval</span>
+        <span className="text-gray-300 font-medium">Interval</span>
         <span className="font-medium">every {days} day{days !== 1 ? 's' : ''}</span>
-        <span className="text-gray-400 font-medium break-all">Merchant</span>
+        <span className="text-gray-300 font-medium break-all">Merchant</span>
         <span className="break-all font-mono text-xs">{data.merchant}</span>
       </div>
 

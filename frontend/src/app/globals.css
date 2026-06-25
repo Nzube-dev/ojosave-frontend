@@ -1,3 +1,11 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  /* Ensure sufficient contrast baseline for the dark theme */
+  body {
+    background-color: #030712; /* gray-950 — darker than gray-900 for better card contrast */
+    color: #f9fafb;            /* gray-50 — 16.7:1 on gray-950, exceeds WCAG AAA */
+  }
+}

@@ -20,5 +20,12 @@ export default defineConfig({
     url: 'http://localhost:3000',
     reuseExistingServer: true,
     timeout: 60_000,
+    env: {
+      // Provide a dummy contract address so the form renders in tests.
+      // Without this CONTRACT_ID is empty and the app shows ContractConfigError.
+      NEXT_PUBLIC_CONTRACT_ID:
+        process.env.NEXT_PUBLIC_CONTRACT_ID ??
+        'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
+    },
   },
 });

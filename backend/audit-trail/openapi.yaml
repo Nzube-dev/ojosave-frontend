@@ -1,0 +1,147 @@
+openapi: 3.1.0
+info:
+  title: SorobanPay Cancellation Audit API
+  version: 0.1.0
+paths:
+  /api/subscriptions/cancellations:
+    post:
+      summary: Persist a confirmed subscription cancellation.
+      operationId: createCancellationAuditEntry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCancellationAuditEntry"
+      responses:
+        "201":
+          description: Cancellation audit entry created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateCancellationAuditResponse"
+        "200":
+          description: Existing audit entry returned for an idempotent retry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateCancellationAuditResponse"
+        "400":
+          description: Invalid request payload.
+        "409":
+          description: Transaction hash belongs to a different cancellation payload.
+  /api/merchants/{merchantAddress}/cancellations:
+    get:
+      summary: List cancellation audit entries for a merchant.
+      operationId: listMerchantCancellations
+      parameters:
+        - name: merchantAddress
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: network
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [testnet, mainnet]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Newest cancellation audit entries first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListMerchantCancellationsResponse"
+components:
+  schemas:
+    CreateCancellationAuditEntry:
+      type: object
+      required:
+        - network
+        - contractId
+        - subscriberAddress
+        - merchantAddress
+        - ledger
+        - transactionHash
+      properties:
+        network:
+          type: string
+          enum: [testnet, mainnet]
+        contractId:
+          type: string
+        subscriberAddress:
+          type: string
+        merchantAddress:
+          type: string
+        tokenAddress:
+          type: string
+        amount:
+          type: string
+          pattern: "^[0-9]+$"
+        intervalSeconds:
+          type: integer
+          minimum: 1
+        nextPaymentAt:
+          type: string
+          format: date-time
+        ledger:
+          type: integer
+          minimum: 1
+        transactionHash:
+          type: string
+        reason:
+          type: string
+          maxLength: 1000
+    CreateCancellationAuditResponse:
+      type: object
+      required:
+        - id
+        - cancelledAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        cancelledAt:
+          type: string
+          format: date-time
+    CancellationAuditEntry:
+      allOf:
+        - $ref: "#/components/schemas/CreateCancellationAuditEntry"
+        - type: object
+          required:
+            - id
+            - cancelledAt
+          properties:
+            id:
+              type: string
+              format: uuid
+            cancelledAt:
+              type: string
+              format: date-time
+    ListMerchantCancellationsResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CancellationAuditEntry"
+        nextCursor:
+          type:
+            - string
+            - "null"

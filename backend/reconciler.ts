@@ -24,14 +24,16 @@ export interface ChainEvent {
   type: EventType;
   subscriber: string;
   merchant: string;
+  token: string;    // SEP-41 token contract ID
   amount: bigint;   // present on subscribe / executed; 0n for cancel
   timestamp: number; // Unix seconds of the ledger that emitted the event
 }
 
-/** The stored state for one (subscriber, merchant) pair in the off-chain DB. */
+/** The stored state for one (subscriber, merchant, token) triple in the off-chain DB. */
 export interface StoredSubscription {
   subscriber: string;
   merchant: string;
+  token: string;          // SEP-41 token contract ID
   amount: bigint;
   interval: number;       // seconds
   next_payment: number;   // Unix timestamp
@@ -40,9 +42,9 @@ export interface StoredSubscription {
 
 /** Minimal DB interface — keeps reconciler testable without a real database. */
 export interface SubscriptionDB {
-  get(subscriber: string, merchant: string): StoredSubscription | undefined;
+  get(subscriber: string, merchant: string, token: string): StoredSubscription | undefined;
   upsert(record: StoredSubscription): void;
-  delete(subscriber: string, merchant: string): void;
+  delete(subscriber: string, merchant: string, token: string): void;
   all(): StoredSubscription[];
 }
 
@@ -75,11 +77,11 @@ export function reconcile(
   const errors: string[] = [];
 
   // 1. Derive expected state by replaying events (oldest → newest).
-  //    Key: "subscriber:merchant"
+  //    Key: "subscriber:merchant:token"
   const expected = new Map<string, StoredSubscription | null>();
 
   for (const ev of events) {
-    const key = `${ev.subscriber}:${ev.merchant}`;
+    const key = `${ev.subscriber}:${ev.merchant}:${ev.token}`;
 
     if (ev.type === 'subscribe') {
       const prev = expected.get(key);
@@ -88,6 +90,7 @@ export function reconcile(
       expected.set(key, {
         subscriber: ev.subscriber,
         merchant: ev.merchant,
+        token: ev.token,
         amount: ev.amount,
         interval,
         next_payment: ev.timestamp + interval,
@@ -114,13 +117,13 @@ export function reconcile(
 
   // 2. Diff expected vs stored.
   for (const [key, want] of expected.entries()) {
-    const [subscriber, merchant] = key.split(':');
-    const have = db.get(subscriber, merchant);
+    const [subscriber, merchant, token] = key.split(':');
+    const have = db.get(subscriber, merchant, token);
 
     if (want === null) {
       // Should be absent.
       if (have !== undefined) {
-        db.delete(subscriber, merchant);
+        db.delete(subscriber, merchant, token);
         repairs.push({ kind: 'delete', subscriber, merchant });
       }
     } else if (have === undefined) {
@@ -137,7 +140,7 @@ export function reconcile(
 
   // 3. Detect DB records with no corresponding chain history (orphans).
   for (const stored of db.all()) {
-    const key = `${stored.subscriber}:${stored.merchant}`;
+    const key = `${stored.subscriber}:${stored.merchant}:${stored.token}`;
     if (!expected.has(key)) {
       errors.push(
         `orphan record in DB for ${key} — no on-chain subscribe event found`,
@@ -152,6 +155,7 @@ export function reconcile(
 
 function recordsMatch(a: StoredSubscription, b: StoredSubscription): boolean {
   return (
+    a.token === b.token &&
     a.amount === b.amount &&
     a.interval === b.interval &&
     a.next_payment === b.next_payment &&

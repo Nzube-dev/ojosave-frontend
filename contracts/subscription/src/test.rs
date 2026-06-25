@@ -3,7 +3,7 @@
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
     token::{self, StellarAssetClient},
-    Address, Env, IntoVal,
+    Address, Env, IntoVal, Symbol,
 };
 
 use crate::{
@@ -570,6 +570,181 @@ fn test_execute_payment_emits_event() {
     assert_eq!(n_after, n_before + 1, "execute_payment should emit 1 event");
 }
 
+// ─── Issue #149 — Event Indexer Compatibility Tests ──────────────────────────
+
+/// Verifies subscribe event topics are exactly:
+///   (symbol("subscribe"), subscriber: Address, merchant: Address, token: Address)
+/// and data is amount: i128.
+/// Event indexers depend on this exact schema for parsing.
+#[test]
+fn test_subscribe_event_topics_and_payload_exact() {
+    let t = T::new();
+    let amt = 500_i128;
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &86_400_u64);
+
+    let all = t.env.events().all();
+    let our_events: Vec<_> = all.iter().filter(|e| e.0 == t.contract_id).collect();
+    assert_eq!(our_events.len(), 1, "exactly one contract event");
+
+    let event = &our_events[0];
+    // Topics: (symbol("subscribe"), subscriber, merchant, token)
+    let expected_topics = (
+        Symbol::new(&t.env, "subscribe"),
+        t.subscriber.clone(),
+        t.merchant.clone(),
+        t.token.clone(),
+    )
+        .into_val(&t.env);
+    assert_eq!(event.1, expected_topics, "subscribe event topics must match indexer schema");
+
+    // Data: amount as i128
+    let expected_data = amt.into_val(&t.env);
+    assert_eq!(event.2, expected_data, "subscribe event data must be amount as i128");
+}
+
+/// Verifies the subscribe event topic count is exactly 4:
+/// symbol + 3 address fields. No extra or missing topics.
+/// Validated by asserting all 4 expected topics match, and that swapping any
+/// one (e.g. wrong symbol) causes a mismatch.
+#[test]
+fn test_subscribe_event_has_four_topics() {
+    let t = T::new();
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &86_400_u64);
+
+    let all = t.env.events().all();
+    let event = all.iter().find(|e| e.0 == t.contract_id).expect("event must exist");
+
+    // Exact 4-topic tuple must match — any missing/extra topic changes the Val encoding.
+    let expected = (
+        Symbol::new(&t.env, "subscribe"),
+        t.subscriber.clone(),
+        t.merchant.clone(),
+        t.token.clone(),
+    )
+        .into_val(&t.env);
+    assert_eq!(event.1, expected, "topics must be exactly (symbol, subscriber, merchant, token)");
+
+    // A 3-topic tuple must NOT match, confirming token is present.
+    let three_topics = (
+        Symbol::new(&t.env, "subscribe"),
+        t.subscriber.clone(),
+        t.merchant.clone(),
+    )
+        .into_val(&t.env);
+    assert_ne!(event.1, three_topics, "token must be present as 4th topic");
+}
+
+/// Verifies that the first topic of a subscribe event is the symbol "subscribe".
+#[test]
+fn test_subscribe_event_first_topic_is_symbol() {
+    let t = T::new();
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &100_i128, &86_400_u64);
+
+    let all = t.env.events().all();
+    let event = all.iter().find(|e| e.0 == t.contract_id).expect("event must exist");
+
+    // Re-build the exact expected topics tuple and compare symbol position via full match.
+    let expected_topics = (
+        Symbol::new(&t.env, "subscribe"),
+        t.subscriber.clone(),
+        t.merchant.clone(),
+        t.token.clone(),
+    )
+        .into_val(&t.env);
+    assert_eq!(
+        event.1, expected_topics,
+        "first topic must be the symbol 'subscribe'"
+    );
+}
+
+/// Verifies executed event schema:
+///   topics: (symbol("executed"), subscriber, merchant, token)
+///   data:   amount as i128
+#[test]
+fn test_executed_event_topics_and_payload_exact() {
+    let t = T::new();
+    let amt = 200_i128;
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &86_400_u64);
+    t.advance(86_401);
+    t.client.execute_payment(&t.subscriber, &t.merchant);
+
+    let all = t.env.events().all();
+    let our_events: Vec<_> = all.iter().filter(|e| e.0 == t.contract_id).collect();
+    // subscribe + executed = 2
+    assert_eq!(our_events.len(), 2);
+
+    let event = &our_events[1]; // executed is second
+    let expected_topics = (
+        Symbol::new(&t.env, "executed"),
+        t.subscriber.clone(),
+        t.merchant.clone(),
+        t.token.clone(),
+    )
+        .into_val(&t.env);
+    assert_eq!(event.1, expected_topics, "executed event topics must match indexer schema");
+    assert_eq!(event.2, amt.into_val(&t.env), "executed event data must be amount as i128");
+}
+
+/// Verifies that subscribe events for different token contracts are distinguished
+/// by token address in the topics — critical for multi-token indexing.
+#[test]
+fn test_subscribe_events_distinct_tokens_have_distinct_topics() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin      = Address::generate(&env);
+    let subscriber = Address::generate(&env);
+    let merchant   = Address::generate(&env);
+
+    let token1 = env.register_stellar_asset_contract_v2(admin.clone()).address();
+    let token2 = env.register_stellar_asset_contract_v2(admin.clone()).address();
+
+    for tok in [&token1, &token2] {
+        StellarAssetClient::new(&env, tok).mint(&subscriber, &1_000_000_i128);
+    }
+
+    let contract_id = env.register(SubscriptionProtocol, ());
+    let client      = SubscriptionProtocolClient::new(&env, &contract_id);
+
+    for tok in [&token1, &token2] {
+        token::Client::new(&env, tok).approve(
+            &subscriber,
+            &contract_id,
+            &500_000_i128,
+            &(env.ledger().sequence() + 100_000_u32),
+        );
+    }
+
+    client.subscribe(&subscriber, &merchant, &token1, &100_i128, &86_400_u64);
+    client.subscribe(&subscriber, &merchant, &token2, &200_i128, &86_400_u64);
+
+    let all = env.events().all();
+    let our_events: Vec<_> = all.iter().filter(|e| e.0 == contract_id).collect();
+    assert_eq!(our_events.len(), 2);
+
+    let topics1 = (
+        Symbol::new(&env, "subscribe"),
+        subscriber.clone(),
+        merchant.clone(),
+        token1.clone(),
+    )
+        .into_val(&env);
+    let topics2 = (
+        Symbol::new(&env, "subscribe"),
+        subscriber.clone(),
+        merchant.clone(),
+        token2.clone(),
+    )
+        .into_val(&env);
+
+    assert_eq!(our_events[0].1, topics1, "first event must reference token1");
+    assert_eq!(our_events[1].1, topics2, "second event must reference token2");
+    assert_ne!(our_events[0].1, our_events[1].1, "distinct tokens produce distinct topics");
+
+    assert_eq!(our_events[0].2, 100_i128.into_val(&env));
+    assert_eq!(our_events[1].2, 200_i128.into_val(&env));
+}
+
 // ─── Requirement 13.11 — No events on failure ────────────────────────────────
 
 #[test]
@@ -678,6 +853,73 @@ fn test_execute_payment_fails_on_insufficient_balance_state_unchanged() {
     let events_after: Vec<_> = t.env.events().all().iter()
         .filter(|e| e.0 == t.contract_id).collect();
     assert_eq!(events_after.len(), 1, "no executed event on failed transfer");
+}
+
+// ─── Transfer failure — subscription state must remain unchanged ──────────────
+
+/// Req: failed transfer due to zero allowance must not mutate subscription state.
+#[test]
+fn test_execute_payment_fails_with_zero_allowance() {
+    let t   = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let before = t.get_sub();
+
+    // Revoke allowance so the token transfer will fail.
+    token::Client::new(&t.env, &t.token).approve(
+        &t.subscriber,
+        &t.contract_id,
+        &0_i128,
+        &(t.env.ledger().sequence() + 1_u32),
+    );
+
+    t.advance(ivl + 1);
+
+    // execute_payment should fail at the token transfer level (host error).
+    let r = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(r.is_err());
+    assert!(!matches!(r, Err(Ok(_))), "must not be a ContractError — it's a host-level panic");
+
+    // Subscription record is unchanged: next_payment was NOT advanced.
+    let after = t.get_sub();
+    assert_eq!(after.next_payment, before.next_payment);
+    assert_eq!(after.amount,       before.amount);
+    assert_eq!(t.sub_bal(),        10_000_000_i128);
+}
+
+/// Req: failed transfer due to insufficient balance must not mutate subscription state.
+#[test]
+fn test_execute_payment_fails_with_insufficient_balance() {
+    let t = T::new();
+    // Subscribe for more than the subscriber's entire balance.
+    let amt = 20_000_000_i128; // subscriber only has 10_000_000
+    let ivl = 86_400_u64;
+
+    // Approve a large allowance so the allowance check passes.
+    token::Client::new(&t.env, &t.token).approve(
+        &t.subscriber,
+        &t.contract_id,
+        &amt,
+        &(t.env.ledger().sequence() + 100_000_u32),
+    );
+
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+    let before = t.get_sub();
+
+    t.advance(ivl + 1);
+
+    // execute_payment should fail at the token transfer level (insufficient balance).
+    let r = t.client.try_execute_payment(&t.subscriber, &t.merchant);
+    assert!(r.is_err());
+    assert!(!matches!(r, Err(Ok(_))), "must not be a ContractError — it's a host-level panic");
+
+    // Subscription record is unchanged: next_payment was NOT advanced.
+    let after = t.get_sub();
+    assert_eq!(after.next_payment, before.next_payment);
+    assert_eq!(after.amount,       before.amount);
+    assert_eq!(t.sub_bal(),        10_000_000_i128);
 }
 
 // ─── Property-Based Tests ─────────────────────────────────────────────────────

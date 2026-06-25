@@ -804,6 +804,56 @@ async function indexEvent(event: DecodedEvent) {
 
 ---
 
+## Backend Role
+
+SorobanPay has a clear separation between on-chain and off-chain responsibilities.
+
+### On-Chain (Soroban Contract)
+
+The smart contract is the single source of truth for subscription state. It is solely responsible for:
+
+| Concern | Details |
+|---------|---------|
+| Subscription state | Creating, updating, and removing `(subscriber, merchant)` pairs in persistent storage |
+| Payment execution | Transferring tokens directly subscriber → merchant via SEP-41 `transfer` |
+| Authorization | Enforcing `require_auth()` on every entry point |
+| Time-lock | Rejecting `execute_payment` before `next_payment` is due |
+| TTL management | Setting and bumping persistent storage TTL on each write |
+| Event emission | Publishing `subscribe` and `executed` events to the Soroban event log |
+
+The contract does **not** handle notifications, analytics, retry logic, or any I/O beyond ledger state and token transfers.
+
+### Off-Chain (Backend Service)
+
+The backend (`backend/`) is an optional layer for concerns that cannot be satisfied on-chain:
+
+| Concern | Details |
+|---------|---------|
+| Event indexing | Polling Soroban RPC `getEvents()` and persisting decoded events to PostgreSQL |
+| Cancellation detection | Inferring cancellations from absence of `executed` events (no cancel event is emitted) |
+| Payout summaries | Aggregating payment history into daily/weekly reports per merchant |
+| Scheduled jobs | Periodic indexing and summary generation via `node-cron` |
+| REST API | Serving merchant dashboards via `/api/summaries/…` endpoints |
+
+The backend is **read-only with respect to on-chain state** — it never submits transactions.
+
+### Responsibility Matrix
+
+```
+                        Contract    Backend    Frontend
+─────────────────────────────────────────────────────
+Store subscription          ✅         ❌          ❌
+Execute payment             ✅         ❌          ❌
+Emit events                 ✅         ❌          ❌
+Index events                ❌         ✅          ❌
+Detect cancellations        ❌         ✅          ❌
+Serve analytics API         ❌         ✅          ❌
+Sign & submit transactions  ❌         ❌          ✅
+Display subscription UI     ❌         ❌          ✅
+```
+
+---
+
 ## References
 
 - [Soroban RPC Event Streaming](https://developers.stellar.org/docs/learn/soroban-rpc/events)

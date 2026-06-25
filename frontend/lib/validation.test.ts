@@ -37,13 +37,13 @@ describe('validateMerchantAddress', () => {
   });
 
   it('should accept valid merchant address', () => {
-    // Valid 56-char address starting with G
-    const valid = 'GABC123DEFG456HIJK789LMNOP123QRST456UVWX789YZAB123CDEFG';
+    // Valid 56-char address starting with G (Stellar base32: A-Z, 2-7)
+    const valid = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
     expect(validateMerchantAddress(valid)).toBeUndefined();
   });
 
   it('should trim whitespace from merchant address', () => {
-    const valid = 'GABC123DEFG456HIJK789LMNOP123QRST456UVWX789YZAB123CDEFG';
+    const valid = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
     expect(validateMerchantAddress(`  ${valid}  `)).toBeUndefined();
   });
 });
@@ -64,13 +64,13 @@ describe('validateTokenAddress', () => {
   });
 
   it('should accept valid token address', () => {
-    // Valid 56-char contract starting with C
-    const valid = 'CABC123DEFG456HIJK789LMNOP123QRST456UVWX789YZAB123CDEFG';
+    // Valid 56-char contract starting with C (Stellar base32: A-Z, 2-7)
+    const valid = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
     expect(validateTokenAddress(valid)).toBeUndefined();
   });
 
   it('should trim whitespace from token address', () => {
-    const valid = 'CABC123DEFG456HIJK789LMNOP123QRST456UVWX789YZAB123CDEFG';
+    const valid = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
     expect(validateTokenAddress(`  ${valid}  `)).toBeUndefined();
   });
 });
@@ -147,8 +147,8 @@ describe('validateInterval', () => {
 // ─── Form Validation Tests ─────────────────────────────────────────────────────
 
 describe('validateSubscriptionForm', () => {
-  const validMerchant = 'GABC123DEFG456HIJK789LMNOP123QRST456UVWX789YZAB123CDEFG';
-  const validToken = 'CABC123DEFG456HIJK789LMNOP123QRST456UVWX789YZAB123CDEFG';
+  const validMerchant = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+  const validToken = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
   it('should return empty object for valid form', () => {
     const errors = validateSubscriptionForm({

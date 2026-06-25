@@ -34,3 +34,26 @@ model PayoutSummary {
   createdAt     DateTime @default(now())
   type          String   // "daily" or "weekly"
 }
+
+model WebhookEndpoint {
+  id        Int      @id @default(autoincrement())
+  merchant  String
+  url       String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([merchant, url])
+}
+
+model WebhookDelivery {
+  id         Int      @id @default(autoincrement())
+  url        String
+  merchant   String
+  event      String
+  payload    String
+  statusCode Int
+  attempt    Int
+  success    Boolean
+  error      String?
+  createdAt  DateTime @default(now())
+}

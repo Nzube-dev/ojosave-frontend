@@ -35,14 +35,10 @@ npm install
 ```
 
 2. Configure environment variables:
-Copy `.env.example` to `.env` and update the values:
-```env
-DATABASE_URL="postgresql://user:password@localhost:5432/sorobanpay?schema=public"
-RPC_URL="https://soroban-testnet.stellar.org"
-NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
-CONTRACT_ID="your-contract-id"
-PORT=3001
+```bash
+cp .env.example .env
 ```
+Edit `.env` and fill in the required values. All variables are documented with descriptions inside `.env.example`.
 
 3. Set up the database:
 ```bash

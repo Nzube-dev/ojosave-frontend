@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import cron from 'node-cron';
+import { validateConfig } from './lib/config';
 import { EventIndexer } from './services/eventIndexer';
 import { PayoutSummaryGenerator } from './services/payoutSummaryGenerator';
 import { PaymentScheduler } from './services/paymentScheduler';
@@ -11,7 +12,7 @@ import auditLogsRouter from './routes/auditLogs';
 import { apiLimiter } from './middleware/rateLimiter';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const { port: PORT, rpcUrl, contractId } = config;
 
 // Middleware
 app.use(cors());

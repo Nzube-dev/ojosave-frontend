@@ -21,6 +21,8 @@ import {
   validateSubscriptionForm,
   isFormValid,
   DEFAULT_INTERVAL_SECONDS,
+  MIN_INTERVAL_SECONDS,
+  MAX_INTERVAL_SECONDS,
   type FieldErrors,
 } from '@/lib/validation';
 import { CONTRACT_ID, NETWORK_PASSPHRASE, NETWORK_NAME, RPC_URL } from '@/constants/network';
@@ -131,6 +133,12 @@ function NetworkBadge() {
 // ─── Contract config guard ─────────────────────────────────────────────────────
 
 function ContractConfigError() {
+  const config = [
+    ['RPC URL', RPC_URL],
+    ['Network passphrase', NETWORK_PASSPHRASE],
+    ['Contract ID', CONTRACT_ID || 'Not configured'],
+  ];
+
   return (
     <div className="w-full max-w-lg mx-auto p-4 sm:p-6">
       <div
@@ -175,6 +183,15 @@ function ContractConfigError() {
             </li>
           </ol>
         </div>
+
+        <dl className="bg-gray-900/60 rounded-lg p-4 mb-6 space-y-3 text-xs">
+          {config.map(([label, value]) => (
+            <div key={label}>
+              <dt className="text-yellow-300 font-semibold">{label}</dt>
+              <dd className="mt-1 break-all font-mono text-gray-300">{value}</dd>
+            </div>
+          ))}
+        </dl>
 
         <div className="border-t border-yellow-600/30 pt-4">
           <p className="text-xs text-gray-300">
@@ -433,6 +450,7 @@ function classifyError(err: unknown): TxErrorInfo {
 
 function ErrorCard({ error, onDismiss }: { error: TxErrorInfo; onDismiss: () => void }) {
   const [showDetails, setShowDetails] = useState(false);
+  const showConfig = /network|rpc|contract|passphrase/i.test(`${error.title} ${error.raw}`);
 
   return (
     <div
@@ -461,6 +479,21 @@ function ErrorCard({ error, onDismiss }: { error: TxErrorInfo; onDismiss: () => 
         <span className="text-blue-400 shrink-0 mt-0.5" aria-hidden="true">→</span>
         <p className="text-gray-200 text-xs leading-relaxed">{error.fix}</p>
       </div>
+
+      {showConfig && (
+        <dl className="bg-gray-900/70 rounded-lg p-3 mb-3 space-y-2 text-xs">
+          {[
+            ['RPC URL', RPC_URL],
+            ['Network passphrase', NETWORK_PASSPHRASE],
+            ['Contract ID', CONTRACT_ID || 'Not configured'],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <dt className="text-red-300 font-semibold">{label}</dt>
+              <dd className="mt-0.5 break-all font-mono text-gray-300">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
 
       {/* Collapsible technical details */}
       <button
@@ -501,6 +534,13 @@ export default function SubscriptionForm() {
   const [txError, setTxError]           = useState<TxErrorInfo | null>(null);
   const [successData, setSuccessData]   = useState<SuccessData | null>(null);
   const [showConfirm, setShowConfirm]   = useState(false);
+  const intervalNum = Number(interval);
+  const liveIntervalError =
+    interval.trim() && Number.isInteger(intervalNum) &&
+    (intervalNum < MIN_INTERVAL_SECONDS || intervalNum > MAX_INTERVAL_SECONDS)
+      ? `Interval must be between ${MIN_INTERVAL_SECONDS.toLocaleString()} and ${MAX_INTERVAL_SECONDS.toLocaleString()} seconds.`
+      : '';
+  const intervalError = fieldErrors.interval || liveIntervalError;
 
   function resetForm() {
     setSuccessData(null);
@@ -673,6 +713,8 @@ export default function SubscriptionForm() {
             <input
               id="amount"
               type="number"
+              inputMode="numeric"
+              pattern="[0-9]*"
               min="1"
               step="1"
               placeholder="100"
@@ -703,6 +745,8 @@ export default function SubscriptionForm() {
             <input
               id="interval"
               type="number"
+              inputMode="numeric"
+              pattern="[0-9]*"
               min="86400"
               max="31536000"
               step="1"
@@ -710,16 +754,16 @@ export default function SubscriptionForm() {
               value={interval}
               onChange={(e) => setInterval(e.target.value)}
               disabled={isSubmitting}
-              aria-describedby={`help-interval${fieldErrors.interval ? ' err-interval' : ''}`}
-              aria-invalid={!!fieldErrors.interval}
+              aria-describedby={`help-interval${intervalError ? ' err-interval' : ''}`}
+              aria-invalid={!!intervalError}
               className={inputCls}
             />
             <p id="help-interval" className="mt-2 text-xs text-gray-500 leading-relaxed">
               Seconds between payments. Min: 86 400 s (1 day), max: 31 536 000 s (1 year). Default: 2 592 000 s (30 days).
             </p>
-            {fieldErrors.interval && (
+            {intervalError && (
               <p id="err-interval" role="alert" className="mt-2 text-xs text-red-400 font-medium">
-                {fieldErrors.interval}
+                {intervalError}
               </p>
             )}
           </div>

@@ -7,3 +7,8 @@ export const NETWORK_PASSPHRASE =
 
 export const CONTRACT_ID =
   process.env.NEXT_PUBLIC_CONTRACT_ID ?? '';
+
+export const NETWORK_NAME =
+  NETWORK_PASSPHRASE === 'Public Global Stellar Network ; September 2015'
+    ? 'Mainnet'
+    : 'Testnet';

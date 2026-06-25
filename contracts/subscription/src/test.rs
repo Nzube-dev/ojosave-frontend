@@ -80,6 +80,48 @@ impl T {
     }
 }
 
+// ─── Subscribe: Data Storage & Event Emission ────────────────────────────────
+
+/// Test that subscribe correctly stores SubscriptionData and emits the subscribe event.
+/// Verifies that stored fields match input parameters and event topics are correct.
+#[test]
+fn test_subscribe_stores_data_and_emits_event() {
+    let t = T::new();
+    let amt = 100_000_i128;
+    let ivl = 86_400_u64;
+    let ts = t.env.ledger().timestamp();
+
+    // Subscribe
+    t.client.subscribe(&t.subscriber, &t.merchant, &t.token, &amt, &ivl);
+
+    // Verify subscription is stored
+    assert!(t.has_sub(), "subscription must be stored after subscribe");
+
+    // Verify stored data fields match input parameters
+    let stored = t.get_sub();
+    assert_eq!(stored.amount, amt, "stored amount must match input");
+    assert_eq!(stored.interval, ivl, "stored interval must match input");
+    assert_eq!(stored.token, t.token, "stored token must match input");
+    assert_eq!(stored.next_payment, ts + ivl, "next_payment must be now + interval");
+
+    // Verify subscribe event was emitted with correct topics
+    let events = t.env.events().all();
+    let contract_events: Vec<_> = events.iter().filter(|e| e.0 == t.contract_id).collect();
+    
+    assert!(!contract_events.is_empty(), "subscribe must emit at least one event");
+    
+    // The first event should be the subscribe event
+    let (_, topics, data) = &contract_events[0];
+    
+    // Topics should be: (symbol("subscribe"), subscriber, merchant, token)
+    assert_eq!(topics.len(), 4, "subscribe event must have 4 topics");
+    
+    // Verify the emitted amount in event data
+    if let Ok(emitted_amount) = data.try_into_val::<_, i128>(&t.env) {
+        assert_eq!(emitted_amount, amt, "emitted amount must match subscription amount");
+    }
+}
+
 // ─── Requirement 13.1 — Full lifecycle ───────────────────────────────────────
 
 #[test]

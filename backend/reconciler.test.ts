@@ -26,12 +26,12 @@ import type {
 
 function makeDB(initial: StoredSubscription[] = []): SubscriptionDB {
   const store = new Map<string, StoredSubscription>(
-    initial.map((r) => [`${r.subscriber}:${r.merchant}`, r]),
+    initial.map((r) => [`${r.subscriber}:${r.merchant}:${r.token}`, r]),
   );
   return {
-    get:    (s, m) => store.get(`${s}:${m}`),
-    upsert: (r) => { store.set(`${r.subscriber}:${r.merchant}`, r); },
-    delete: (s, m) => { store.delete(`${s}:${m}`); },
+    get:    (s, m, t) => store.get(`${s}:${m}:${t}`),
+    upsert: (r) => { store.set(`${r.subscriber}:${r.merchant}:${r.token}`, r); },
+    delete: (s, m, t) => { store.delete(`${s}:${m}:${t}`); },
     all:    () => [...store.values()],
   };
 }
@@ -40,6 +40,7 @@ function makeDB(initial: StoredSubscription[] = []): SubscriptionDB {
 
 const SUB  = 'GAAA';
 const MER  = 'GBBB';
+const TOK  = 'CTOK';
 const AMT  = 100_000n;
 const IVL  = 86_400;
 const T0   = 1_700_000_000;
@@ -48,6 +49,7 @@ const subscribeEvent = (overrides?: Partial<ChainEvent>): ChainEvent => ({
   type:       'subscribe',
   subscriber: SUB,
   merchant:   MER,
+  token:      TOK,
   amount:     AMT,
   timestamp:  T0,
   ...overrides,
@@ -57,6 +59,7 @@ const executedEvent = (overrides?: Partial<ChainEvent>): ChainEvent => ({
   type:       'executed',
   subscriber: SUB,
   merchant:   MER,
+  token:      TOK,
   amount:     AMT,
   timestamp:  T0 + IVL + 1,
   ...overrides,
@@ -66,6 +69,7 @@ const cancelEvent = (overrides?: Partial<ChainEvent>): ChainEvent => ({
   type:       'cancel',
   subscriber: SUB,
   merchant:   MER,
+  token:      TOK,
   amount:     0n,
   timestamp:  T0 + IVL * 2,
   ...overrides,
@@ -74,6 +78,7 @@ const cancelEvent = (overrides?: Partial<ChainEvent>): ChainEvent => ({
 const storedRecord = (overrides?: Partial<StoredSubscription>): StoredSubscription => ({
   subscriber:      SUB,
   merchant:        MER,
+  token:           TOK,
   amount:          AMT,
   interval:        IVL,
   next_payment:    T0 + IVL,
@@ -101,7 +106,7 @@ describe('reconcile()', () => {
     expect(result.errors).toHaveLength(0);
 
     // DB must now contain the correct record.
-    const stored = db.get(SUB, MER);
+    const stored = db.get(SUB, MER, TOK);
     expect(stored).toBeDefined();
     expect(stored!.amount).toBe(AMT);
     expect(stored!.next_payment).toBe(T0 + IVL);
@@ -122,7 +127,7 @@ describe('reconcile()', () => {
       expect(repair.previous.amount).toBe(999n);
       expect(repair.next.amount).toBe(AMT);
     }
-    expect(db.get(SUB, MER)!.amount).toBe(AMT);
+    expect(db.get(SUB, MER, TOK)!.amount).toBe(AMT);
   });
 
   // 4
@@ -156,7 +161,7 @@ describe('reconcile()', () => {
 
     const deleteRepair = result.repairs.find((r) => r.kind === 'delete');
     expect(deleteRepair).toBeDefined();
-    expect(db.get(SUB, MER)).toBeUndefined();
+    expect(db.get(SUB, MER, TOK)).toBeUndefined();
     expect(result.errors).toHaveLength(0);
   });
 
@@ -169,7 +174,7 @@ describe('reconcile()', () => {
     expect(result.errors[0]).toMatch(/orphan/i);
     expect(result.errors[0]).toContain(`${SUB}:${MER}`);
     // Orphan detection does NOT auto-delete; only errors are reported.
-    expect(db.get(SUB, MER)).toBeDefined();
+    expect(db.get(SUB, MER, TOK)).toBeDefined();
   });
 
   // 7
@@ -199,7 +204,7 @@ describe('reconcile()', () => {
     // (insert path skipped because expected final state is null)
     expect(deleteRepair).toBeUndefined(); // DB was empty; nothing to delete
     expect(insertRepair).toBeUndefined(); // Expected state is null (cancelled), so no insert
-    expect(db.get(SUB, MER)).toBeUndefined();
+    expect(db.get(SUB, MER, TOK)).toBeUndefined();
     expect(result.errors).toHaveLength(0);
   });
 
@@ -215,7 +220,7 @@ describe('reconcile()', () => {
 
     expect(result.repairs).toHaveLength(1);
     expect(result.repairs[0].kind).toBe('insert');
-    const stored = db.get(SUB, MER);
+    const stored = db.get(SUB, MER, TOK);
     expect(stored).toBeDefined();
     expect(stored!.amount).toBe(200_000n);
     expect(stored!.next_payment).toBe(t2 + IVL);
@@ -246,7 +251,49 @@ describe('reconcile()', () => {
 
     expect(result.repairs).toHaveLength(2);
     expect(result.repairs.every((r) => r.kind === 'insert')).toBe(true);
-    expect(db.get(SUB, MER)).toBeDefined();
-    expect(db.get(OTHER_SUB, MER)).toBeDefined();
+    expect(db.get(SUB, MER, TOK)).toBeDefined();
+    expect(db.get(OTHER_SUB, MER, TOK)).toBeDefined();
+  });
+
+  // Multi-token: same subscriber/merchant with two different tokens → treated as independent subscriptions
+  test('same subscriber+merchant with two tokens → independent subscriptions', () => {
+    const TOK2 = 'CTOK2';
+    const db = makeDB();
+
+    const result = reconcile(
+      [
+        subscribeEvent(),                              // SUB→MER with TOK
+        subscribeEvent({ token: TOK2, amount: 200_000n }), // SUB→MER with TOK2
+      ],
+      db, IVL,
+    );
+
+    expect(result.repairs).toHaveLength(2);
+    expect(result.repairs.every((r) => r.kind === 'insert')).toBe(true);
+    const recTok1 = db.get(SUB, MER, TOK);
+    const recTok2 = db.get(SUB, MER, TOK2);
+    expect(recTok1).toBeDefined();
+    expect(recTok2).toBeDefined();
+    expect(recTok1!.amount).toBe(100_000n);
+    expect(recTok2!.amount).toBe(200_000n);
+  });
+
+  // Multi-token: cancel only removes the matching token subscription
+  test('cancel on one token does not affect subscription for another token', () => {
+    const TOK2 = 'CTOK2';
+    const db = makeDB();
+
+    const result = reconcile(
+      [
+        subscribeEvent(),
+        subscribeEvent({ token: TOK2 }),
+        cancelEvent(), // cancels TOK only
+      ],
+      db, IVL,
+    );
+
+    expect(db.get(SUB, MER, TOK)).toBeUndefined();
+    expect(db.get(SUB, MER, TOK2)).toBeDefined();
+    expect(result.errors).toHaveLength(0);
   });
 });

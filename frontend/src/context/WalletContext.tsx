@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 /**
  * WalletContext.tsx
@@ -16,8 +16,8 @@ import React, {
   useState,
   useEffect,
   type ReactNode,
-} from 'react';
-import { connectWallet, detectFreighter } from '@/lib/wallet_manager';
+} from "react";
+import { connectWallet, detectFreighter } from "@/lib/wallet_manager";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,8 +30,8 @@ export interface WalletContextValue {
   connectError: string | null;
   /** True when Freighter extension is detected in the browser. */
   freighterInstalled: boolean;
-  /** True when a previously-connected session has become invalid (Freighter unavailable). */
-  sessionInvalid: boolean;
+  /** True while checking Freighter availability on initial load. */
+  isCheckingFreighter: boolean;
   /** Trigger wallet connection — opens Freighter permission dialog. */
   connect: () => Promise<void>;
   /** Clear publicKey and return to disconnected state. */
@@ -48,22 +48,31 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [publicKey, setPublicKey] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
-  const [freighterInstalled, setFreighterInstalled] = useState(true);
-  const [sessionInvalid, setSessionInvalid] = useState(false);
+  const [freighterInstalled, setFreighterInstalled] = useState(false);
+  const [isCheckingFreighter, setIsCheckingFreighter] = useState(true);
 
-  // Poll for Freighter availability every 10 s when a session is active.
-  // If Freighter disappears, mark session invalid so the UI can show a fallback.
+  // Check Freighter availability on mount (Issue #110)
   useEffect(() => {
-    if (!publicKey) {
-      setSessionInvalid(false);
-      return;
-    }
-    const id = setInterval(async () => {
-      const ok = await detectFreighter();
-      if (!ok) setSessionInvalid(true);
-    }, 10_000);
-    return () => clearInterval(id);
-  }, [publicKey]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const installed = await detectFreighter();
+        if (!cancelled) {
+          setFreighterInstalled(installed);
+          if (!installed) {
+            setConnectError(
+              "Freighter is not installed. Install it from https://www.freighter.app",
+            );
+          }
+        }
+      } finally {
+        if (!cancelled) setIsCheckingFreighter(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const connect = useCallback(async () => {
     setIsConnecting(true);
@@ -77,7 +86,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
       if (!installed) {
         setConnectError(
-          'Freighter is not installed. Install it from https://www.freighter.app',
+          "Freighter is not installed. Install it from https://www.freighter.app",
         );
         return;
       }
@@ -87,7 +96,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setPublicKey(key);
     } catch (err) {
       // User denied access or another Freighter error (Req 9.4)
-      const msg = err instanceof Error ? err.message : 'Wallet connection failed.';
+      const msg =
+        err instanceof Error ? err.message : "Wallet connection failed.";
       setConnectError(msg);
       setPublicKey(null); // Return to disconnected state (Req 9.4)
     } finally {
@@ -96,7 +106,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const disconnect = useCallback(() => {
-    setPublicKey(null);     // Clears stored key (Req 9.6)
+    setPublicKey(null); // Clears stored key (Req 9.6)
     setConnectError(null);
     setSessionInvalid(false);
   }, []);
@@ -108,7 +118,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         isConnecting,
         connectError,
         freighterInstalled,
-        sessionInvalid,
+        isCheckingFreighter,
         connect,
         disconnect,
       }}

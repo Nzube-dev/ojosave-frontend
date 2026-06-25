@@ -12,7 +12,7 @@ import {
   isAllowed,
   setAllowed,
   requestAccess,
-  getPublicKey,
+  getAddress,
   signTransaction,
 } from '@stellar/freighter-api';
 
@@ -41,8 +41,6 @@ export async function detectFreighter(): Promise<boolean> {
  *
  * Only the key returned from the explicit requestAccess call in this session
  * is returned — never from cached credentials (Req 9.3).
- *
- * @returns Stellar G-address of the connected account.
  */
 export async function connectWallet(): Promise<string> {
   const installed = await detectFreighter();
@@ -66,15 +64,15 @@ export async function connectWallet(): Promise<string> {
   }
 
   // Retrieve the public key from the current session response
-  const keyResult = await getPublicKey();
+  const keyResult = await getAddress();
   if (keyResult.error) {
     throw new Error(`Could not retrieve public key: ${keyResult.error}`);
   }
-  if (!keyResult.publicKey) {
+  if (!keyResult.address) {
     throw new Error('Freighter returned an empty public key.');
   }
 
-  return keyResult.publicKey;
+  return keyResult.address;
 }
 
 // ─── Transaction signing ──────────────────────────────────────────────────────

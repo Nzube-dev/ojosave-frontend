@@ -1,5 +1,8 @@
 import { SorobanRpc, xdr } from '@stellar/stellar-sdk';
 import prisma from '../lib/prisma';
+import { AuditLogger } from './auditLogger';
+
+const auditLogger = new AuditLogger();
 
 export class EventIndexer {
   private rpcUrl: string;
@@ -109,6 +112,19 @@ export class EventIndexer {
           ledgerTimestamp: BigInt(event.ledger),
         },
       });
+
+      // Persist audit log for every executed payment
+      if (eventType === 'executed') {
+        await auditLogger.logPayment({
+          eventType,
+          subscriber,
+          merchant,
+          token,
+          amount,
+          transactionHash: event.id, // Soroban event ID is unique per transaction
+          ledger: BigInt(event.ledger),
+        });
+      }
 
       console.log(`Stored event: ${eventType} for merchant ${merchant}`);
     } catch (error) {

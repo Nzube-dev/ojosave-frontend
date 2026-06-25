@@ -17,10 +17,23 @@ model Event {
   type          String   // "subscribe" or "executed"
   subscriber    String
   merchant      String
-  token         String?
+  token         String
   amount        String   // Store as string to handle big integers
   ledgerTimestamp BigInt
   createdAt     DateTime @default(now())
+}
+
+model AuditLog {
+  id               Int      @id @default(autoincrement())
+  eventType        String
+  subscriber       String
+  merchant         String
+  token            String
+  amount           String
+  transactionHash  String   @unique
+  ledger           BigInt
+  status           String   @default("executed")
+  createdAt        DateTime @default(now())
 }
 
 model PayoutSummary {
@@ -33,4 +46,27 @@ model PayoutSummary {
   currency      String   // Token address
   createdAt     DateTime @default(now())
   type          String   // "daily" or "weekly"
+}
+
+model WebhookEndpoint {
+  id        Int      @id @default(autoincrement())
+  merchant  String
+  url       String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([merchant, url])
+}
+
+model WebhookDelivery {
+  id         Int      @id @default(autoincrement())
+  url        String
+  merchant   String
+  event      String
+  payload    String
+  statusCode Int
+  attempt    Int
+  success    Boolean
+  error      String?
+  createdAt  DateTime @default(now())
 }

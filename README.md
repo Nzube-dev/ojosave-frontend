@@ -7,7 +7,7 @@ A production-grade, non-custodial recurring payments protocol built on Stellar's
 ## Architecture
 
 ```
-SorobanPay
+ajosave-frontend
 ├── contracts/subscription/   Rust/Soroban smart contract
 ├── deploy/deploy.sh          Automated testnet/mainnet deployment
 ├── frontend/                 Next.js 14 TypeScript frontend

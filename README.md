@@ -1,4 +1,4 @@
-# ajosave-frontend
+# ojosave-frontend
 
 A production-grade, non-custodial recurring payments protocol built on Stellar's Soroban smart contract platform. Enables SaaS billing, creator subscriptions, and recurring donations directly on-chain — no custodial wallets, no pre-authorized transaction arrays.
 
@@ -7,7 +7,7 @@ A production-grade, non-custodial recurring payments protocol built on Stellar's
 ## Architecture
 
 ```
-ajosave-frontend
+ojosave-frontend
 ├── contracts/subscription/   Rust/Soroban smart contract
 ├── deploy/deploy.sh          Automated testnet/mainnet deployment
 ├── frontend/                 Next.js 14 TypeScript frontend

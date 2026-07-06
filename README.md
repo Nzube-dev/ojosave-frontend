@@ -1,4 +1,4 @@
-# SorobanPay — Decentralized Subscription & Recurring Payments Protocol
+# ajosave-frontend
 
 A production-grade, non-custodial recurring payments protocol built on Stellar's Soroban smart contract platform. Enables SaaS billing, creator subscriptions, and recurring donations directly on-chain — no custodial wallets, no pre-authorized transaction arrays.
 
@@ -33,7 +33,7 @@ SorobanPay
 
 ---
 
-## Smart Contract
+## ajosave-frontend
 
 ### Build
 
